@@ -243,7 +243,7 @@ def _description_placeholders(
 class StremioStreamBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle configuration from the Home Assistant UI."""
 
-    VERSION = 5
+    VERSION = 6
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None

@@ -35,6 +35,7 @@ from .const import (
     ATTR_STREAM_INDEX,
     ATTR_URL,
     CONF_ADDON_MANIFEST_URL,
+    CONF_AUDIO_MODE,
     CONF_CATALOG_MANIFEST_URLS,
     CONF_DEFAULT_MEDIA_PLAYER,
     CONF_DEFAULT_STREAM_INDEX,
@@ -50,6 +51,7 @@ from .const import (
     CONF_SUBTITLE_CONVERT_VTT,
     CONF_SUBTITLE_LANGUAGES,
     CONF_SUBTITLE_MANIFEST_URLS,
+    DEFAULT_AUDIO_MODE,
     DEFAULT_CINEMETA_MANIFEST,
     DEFAULT_EXCLUDE_KEYWORDS,
     DEFAULT_IDEAL_LINK_FILTER,
@@ -368,6 +370,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             options[CONF_SPORTS_MANIFEST_URLS] = [DEFAULT_SPORTS_MANIFEST]
         data.setdefault(CONF_STREAMING_SERVER_URL, DEFAULT_STREAMING_SERVER_URL)
         version = 5
+    if version < 6:
+        # v0.4.0 made automatic hlsv2 wrapping the default. Restore the direct
+        # route that worked in earlier versions; force_transcode remains opt-in.
+        current = {**data, **options}
+        if current.get(CONF_AUDIO_MODE) in (None, "automatic"):
+            options[CONF_AUDIO_MODE] = DEFAULT_AUDIO_MODE
+        version = 6
     hass.config_entries.async_update_entry(
         entry, data=data, options=options, version=version
     )

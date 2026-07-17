@@ -1,14 +1,19 @@
-# Stremio Stream Bridge v0.4.2 for Home Assistant
+# Stremio Stream Bridge v0.4.3 for Home Assistant
 
 Custom Home Assistant integration that combines Stremio-compatible catalogs, stream providers and subtitles, then sends the selected media through a Stremio stream-server running on a PC.
 
-## v0.4.2 configuration repair
+## v0.4.3 direct-playback restoration
 
 - Fixes the false **cannot connect** error caused by temporary failures in optional subtitle, Latin Audio or Sports add-ons. Only the main PC stream-server and the core catalog/stream providers are mandatory.
 - Fixes configured manifest URLs containing commas, such as Torrentio language/provider settings, being split into broken URLs.
 - Older v0.4 entries with empty optional profiles are migrated automatically and receive prefilled Latin Audio and Sports manifests.
 - The PC stream-server URL is now editable from **Configure** and defaults to the address already used by this installation: `http://192.168.1.145:11470`.
 - The subtitle base field recommends the Raspberry Pi/Home Assistant LAN URL detected through the route to the PC.
+
+- Restores the direct stream URL used by versions that played successfully before v0.4.
+- Migrates existing `automatic` audio mode entries to `direct`.
+- Uses `hlsv2` only when `force_transcode` is selected explicitly.
+- Tests a generated `hlsv2` playlist and falls back to the direct URL if conversion fails.
 
 Recommended prefilled optional profiles:
 
@@ -40,7 +45,7 @@ https://stremverse1.alwaysdata.net/manifest.json
 1. Copy `custom_components/stremio_stream_bridge` to `/config/custom_components/`.
 2. Replace the existing folder when updating.
 3. Restart Home Assistant.
-4. Keep the existing config entry; it migrates automatically to version 5.
+4. Keep the existing config entry; it migrates automatically to version 6.
 5. Open **Settings → Devices & services → Stremio Stream Bridge → Configure**.
 
 ## Default profile
@@ -79,11 +84,11 @@ Disable the setting to restore the manual list of source links.
 
 The **Audio compatibility** option has three modes:
 
-- `automatic` — default. Torrent/MKV-like sources are routed through stream-server HLS using H.264/AAC stereo. Existing HLS/DASH live feeds are left untouched.
-- `direct` — sends the original stream URL directly to the player.
-- `force_transcode` — forces stream-server transcoding for every non-live source.
+- `direct` — default. Sends the original stream-server URL directly to the player, restoring the route used before v0.4.
+- `automatic` — retained for backwards compatibility and currently behaves like `direct`.
+- `force_transcode` — explicitly asks stream-server for H.264/AAC HLS. If `hlsv2` fails, playback falls back to the original direct URL.
 
-Automatic mode is intended to fix the common situation where Cast shows video but cannot decode DTS, TrueHD, E-AC-3 or another audio track.
+Direct playback is the safe default because not every stream-server build can generate `hlsv2`. Use `force_transcode` only for files that play video without compatible audio.
 
 ## Borderless subtitles
 

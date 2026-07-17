@@ -57,7 +57,7 @@
           "subtitle_manifest_urls": "Una URL por línea. Dejalo vacío para desactivar.",
           "play_ideal_on_select": "Activado por defecto. Películas, episodios y eventos reproducen directamente sin abrir la lista de enlaces.",
           "ideal_link_filter": "Prioriza 1080p, más semillas y, ante empate, menor tamaño.",
-          "audio_mode": "Automático envuelve torrents problemáticos en HLS H.264/AAC. Directo no convierte. Forzar transcodifica siempre.",
+          "audio_mode": "Directo es el modo seguro predeterminado y conserva la ruta que funcionaba en versiones anteriores. Automático queda como alias de reproducción directa. Forzar usa hlsv2 y vuelve a directo si la conversión falla.",
           "exclude_keywords": "Separadas por comas, por ejemplo CAM, TS, HDCAM.",
           "subtitle_mode": "Automático carga el primer idioma preferido en Google Cast.",
           "subtitle_languages": "Códigos ISO por prioridad, por ejemplo spa, eng.",

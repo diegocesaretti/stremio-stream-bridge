@@ -67,28 +67,33 @@ def prepare_playback(
     *,
     profile: str,
 ) -> tuple[str, str]:
-    """Resolve a stream and optionally route it through hlsv2 for AAC audio."""
+    """Resolve a stream while keeping the proven direct path as the default.
+
+    v0.4.0 attempted to route likely-incompatible files through ``hlsv2`` in
+    automatic mode. Some stream-server builds expose the endpoint but cannot
+    actually create the playlist, which broke media that previously played.
+    Automatic is therefore a backwards-compatible alias for direct playback.
+    HLS transcoding is used only when the user explicitly selects
+    ``force_transcode``.
+    """
     resolved_url = server.resolve_stream(stream)
     mode = str(options.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE))
-    if mode == "direct":
+
+    # Never wrap an existing live playlist. Its tokens, Referer headers and
+    # relative segment URLs must remain exactly as supplied by the add-on.
+    lowered_url = resolved_url.lower().split("?", 1)[0]
+    is_playlist = lowered_url.endswith((".m3u8", ".mpd"))
+    if mode != "force_transcode" or profile == PROFILE_SPORTS or is_playlist:
         return resolved_url, guess_stream_mime_type(stream, resolved_url)
 
-    # Existing HLS/DASH feeds should stay as supplied. Wrapping live playlists in
-    # hlsv2 can break tokens, Referer headers and relative segment URLs.
-    force = mode == "force_transcode"
-    should_wrap = force or (
-        profile != PROFILE_SPORTS and needs_compatible_hls(stream, resolved_url)
+    return (
+        server.build_compatible_hls_url(
+            resolved_url,
+            force_transcoding=True,
+            max_audio_channels=2,
+        ),
+        _HLS_MIME,
     )
-    if should_wrap:
-        return (
-            server.build_compatible_hls_url(
-                resolved_url,
-                force_transcoding=force,
-                max_audio_channels=2,
-            ),
-            _HLS_MIME,
-        )
-    return resolved_url, guess_stream_mime_type(stream, resolved_url)
 
 
 async def prepare_first_playable(
@@ -98,11 +103,13 @@ async def prepare_first_playable(
     *,
     profile: str,
 ) -> tuple[dict[str, Any], str, str]:
-    """Resolve ranked candidates and skip dead proxied playlists."""
+    """Resolve ranked candidates and fall back safely when HLS conversion fails."""
     if not candidates:
         raise StremioBridgeError("No stream candidates are available")
 
     failures: list[str] = []
+    mode = str(options.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE))
+
     for position, stream in enumerate(candidates):
         try:
             url, mime_type = prepare_playback(server, stream, options, profile=profile)
@@ -128,8 +135,28 @@ async def prepare_first_playable(
             reason or "validation failed",
         )
 
+        # A failed hlsv2 conversion must never make a formerly-working stream
+        # unusable. Restore the original stream-server URL immediately.
+        if mode == "force_transcode" and "/hlsv2/" in url:
+            try:
+                direct_url = server.resolve_stream(stream)
+                direct_mime = guess_stream_mime_type(stream, direct_url)
+                direct_valid, direct_reason = await server.async_validate_media_url(
+                    direct_url, direct_mime
+                )
+            except StremioBridgeError as err:
+                failures.append(str(err))
+            else:
+                if direct_valid:
+                    _LOGGER.warning(
+                        "hlsv2 audio conversion failed; falling back to direct playback"
+                    )
+                    return stream, direct_url, direct_mime
+                failures.append(direct_reason or "direct fallback validation failed")
+
     detail = "; ".join(failures[-3:])
     raise StremioBridgeError(
         "All automatically selected stream links failed validation"
         + (f": {detail}" if detail else "")
     )
+

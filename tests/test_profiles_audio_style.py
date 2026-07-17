@@ -101,7 +101,7 @@ async def test_sports_profile_uses_own_catalog():
     assert manager.catalogs("tv", CONST.PROFILE_SPORTS)[0][1]["id"] == "live"
 
 
-def test_automatic_audio_mode_wraps_torrent_as_h264_aac_hls():
+def test_automatic_audio_mode_preserves_direct_torrent_playback():
     server = API.StremioStreamServerClient(object(), "http://server:11470")
     stream = {
         "infoHash": "0123456789abcdef0123456789abcdef01234567",
@@ -114,10 +114,9 @@ def test_automatic_audio_mode_wraps_torrent_as_h264_aac_hls():
         {CONST.CONF_AUDIO_MODE: "automatic"},
         profile=CONST.PROFILE_DEFAULT,
     )
-    assert "/hlsv2/" in url
-    assert "audioCodecs=aac" in url
-    assert "videoCodecs=h264" in url
-    assert mime == "application/vnd.apple.mpegurl"
+    assert "/hlsv2/" not in url
+    assert "/0123456789abcdef0123456789abcdef01234567/0" in url
+    assert mime == "video/matroska"
 
 
 def test_sports_hls_is_not_wrapped_twice():
@@ -203,8 +202,9 @@ async def test_automatic_playback_skips_dead_proxied_playlist():
     assert mime == "application/vnd.apple.mpegurl"
 
 
-def test_v042_recommended_profile_defaults_are_populated():
+def test_v043_safe_defaults_are_populated():
     assert CONST.DEFAULT_STREAMING_SERVER_URL == "http://192.168.1.145:11470"
+    assert CONST.DEFAULT_AUDIO_MODE == "direct"
     assert "language=spanish,latino" in CONST.DEFAULT_LATIN_MANIFEST
     assert CONST.DEFAULT_SPORTS_MANIFEST == (
         "https://stremverse1.alwaysdata.net/manifest.json"
@@ -229,3 +229,34 @@ async def test_optional_provider_failure_does_not_block_core_addons():
     assert len(addons) == 2
     assert "https://sports/manifest.json" in manager.errors
     assert manager.catalogs("movie", CONST.PROFILE_DEFAULT)
+
+
+@pytest.mark.asyncio
+async def test_failed_forced_hls_falls_back_to_direct_url():
+    class FakeServer:
+        def resolve_stream(self, stream):
+            return "http://server:11470/hash/0?f=movie.mkv"
+
+        def build_compatible_hls_url(self, media_url, **kwargs):
+            return "http://server:11470/hlsv2/session/master.m3u8?mediaURL=x"
+
+        async def async_validate_media_url(self, url, mime_type):
+            if "/hlsv2/" in url:
+                return False, "HTTP 500"
+            return True, None
+
+    stream = {
+        "infoHash": "0123456789abcdef0123456789abcdef01234567",
+        "fileIdx": 0,
+        "behaviorHints": {"filename": "movie.mkv"},
+    }
+    selected, url, mime = await PLAYBACK.prepare_first_playable(
+        FakeServer(),
+        [stream],
+        {CONST.CONF_AUDIO_MODE: "force_transcode"},
+        profile=CONST.PROFILE_DEFAULT,
+    )
+    assert selected is stream
+    assert "/hlsv2/" not in url
+    assert url.endswith("movie.mkv")
+    assert mime == "video/matroska"

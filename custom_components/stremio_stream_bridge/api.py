@@ -164,9 +164,9 @@ class StremioStreamServerClient:
     async def async_validate_media_url(self, url: str, mime_type: str) -> tuple[bool, str | None]:
         """Lightly validate proxied HLS/DASH before handing it to Cast.
 
-        Torrent and hlsv2 URLs are deliberately not probed because opening them may
-        start a download/transcode. The important regression case is an external
-        playlist routed through stream-server's /proxy endpoint.
+        Direct torrent URLs are deliberately not probed because opening them may
+        start a download. Proxied playlists and explicitly requested hlsv2
+        conversions are checked before they are handed to Cast.
         """
         lowered = url.lower().split("?", 1)[0]
         is_playlist = mime_type in {
@@ -174,10 +174,10 @@ class StremioStreamServerClient:
             "application/x-mpegurl",
             "application/dash+xml",
         } or lowered.endswith((".m3u8", ".mpd"))
-        if not is_playlist or "/proxy/" not in url:
+        if not is_playlist or not any(marker in url for marker in ("/proxy/", "/hlsv2/")):
             return True, None
 
-        timeout = ClientTimeout(total=12)
+        timeout = ClientTimeout(total=30 if "/hlsv2/" in url else 12)
         try:
             async with self._session.get(url, timeout=timeout) as response:
                 if response.status >= 400:

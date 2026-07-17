@@ -57,7 +57,7 @@
           "subtitle_manifest_urls": "One URL per line. Leave empty to disable.",
           "play_ideal_on_select": "Enabled by default. Movies, episodes and events play directly without opening the source list.",
           "ideal_link_filter": "Prefers 1080p, most seeders and, on ties, the smallest file.",
-          "audio_mode": "Automatic wraps problematic torrents as H.264/AAC HLS. Direct performs no conversion. Force always transcodes.",
+          "audio_mode": "Direct is the safe default and preserves the playback route used by earlier versions. Automatic is kept as a direct-playback compatibility alias. Force transcode uses hlsv2 and falls back to direct if conversion fails.",
           "exclude_keywords": "Comma separated, for example CAM, TS, HDCAM.",
           "subtitle_mode": "Automatic loads the first preferred language on Google Cast.",
           "subtitle_languages": "ISO codes in priority order, for example spa, eng.",

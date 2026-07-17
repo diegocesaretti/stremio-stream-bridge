@@ -138,6 +138,7 @@ class StremioBridgeMediaSource(MediaSource):
                 subtitle = await async_prepare_subtitle_track(
                     runtime.manager,
                     runtime.server,
+                    runtime.subtitle_proxy,
                     current,
                     payload["type"],
                     payload["id"],

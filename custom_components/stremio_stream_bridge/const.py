@@ -19,6 +19,7 @@ CONF_IDEAL_LINK_FILTER = "ideal_link_filter"
 CONF_SUBTITLE_MODE = "subtitle_mode"
 CONF_SUBTITLE_LANGUAGES = "subtitle_languages"
 CONF_SUBTITLE_CONVERT_VTT = "subtitle_convert_vtt"
+CONF_SUBTITLE_BASE_URL = "subtitle_base_url"
 
 DEFAULT_CINEMETA_MANIFEST = "https://v3-cinemeta.strem.io/manifest.json"
 DEFAULT_TORRENTIO_MANIFEST = "https://torrentio.strem.fun/manifest.json"
@@ -30,6 +31,7 @@ DEFAULT_IDEAL_LINK_FILTER = True
 DEFAULT_SUBTITLE_MODE = "automatic"
 DEFAULT_SUBTITLE_LANGUAGES = "spa, eng"
 DEFAULT_SUBTITLE_CONVERT_VTT = True
+DEFAULT_SUBTITLE_BASE_URL = ""
 DEFAULT_SCAN_INTERVAL_SECONDS = 60
 
 QUALITY_OPTIONS = ["auto", "2160p", "1080p", "720p", "480p", "lowest"]
@@ -39,6 +41,7 @@ SERVICE_PLAY = "play"
 SERVICE_PLAY_URL = "play_url"
 SERVICE_REFRESH = "refresh"
 SERVICE_SEARCH = "search"
+SERVICE_SUBTITLE_DIAGNOSTICS = "subtitle_diagnostics"
 
 ATTR_ENTRY_ID = "entry_id"
 ATTR_MEDIA_TYPE = "media_type"

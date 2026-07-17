@@ -12,7 +12,8 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import StremioBridgeRuntime
-from .const import DOMAIN
+from .const import CONF_DEFAULT_MEDIA_PLAYER, DOMAIN
+from .subtitle_support import is_cast_player
 
 
 async def async_setup_entry(
@@ -34,6 +35,7 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
 
     def __init__(self, entry: ConfigEntry, runtime: StremioBridgeRuntime) -> None:
         super().__init__(runtime.coordinator)
+        self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_connectivity"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -53,9 +55,16 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
         values = settings.get("values", settings) if isinstance(settings, dict) else {}
         addons = data.get("addons", [])
         errors = data.get("addon_errors", {})
+        default_player = self._entry.options.get(
+            CONF_DEFAULT_MEDIA_PLAYER,
+            self._entry.data.get(CONF_DEFAULT_MEDIA_PLAYER),
+        )
         return {
             "server_version": values.get("serverVersion") if isinstance(values, dict) else None,
             "addons": addons,
             "addon_count": len(addons) if isinstance(addons, list) else 0,
             "addon_errors": errors,
+            "subtitle_provider_errors": dict(self.coordinator.manager.last_subtitle_errors),
+            "default_player": default_player,
+            "external_subtitles_supported": is_cast_player(self.hass, default_player),
         }

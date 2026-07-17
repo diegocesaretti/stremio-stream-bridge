@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+
+- Fixed external subtitles failing silently.
+- Added Home Assistant-hosted temporary WebVTT proxy with CORS.
+- Added gzip/ZIP, UTF-8, UTF-16, Windows-1252 and Latin-1 subtitle decoding.
+- Added fallback retry without Stremio subtitle extras.
+- Marked Cast video playback as BUFFERED instead of LIVE.
+- Added subtitle provider errors and Cast compatibility to the connectivity sensor.
+- Added an optional LAN subtitle base URL for receivers that cannot resolve Home Assistant automatically.
+
 ## 0.3.0
 
 - Added subtitle add-on aggregation and OpenSubtitles v3 default configuration.

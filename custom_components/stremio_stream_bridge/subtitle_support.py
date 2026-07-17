@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -12,13 +13,18 @@ from homeassistant.helpers import entity_registry as er
 from .aggregator import StremioAddonManager
 from .api import StremioStreamServerClient
 from .const import (
+    CONF_SUBTITLE_BASE_URL,
     CONF_SUBTITLE_CONVERT_VTT,
     CONF_SUBTITLE_LANGUAGES,
     CONF_SUBTITLE_MODE,
+    DEFAULT_SUBTITLE_BASE_URL,
     DEFAULT_SUBTITLE_CONVERT_VTT,
     DEFAULT_SUBTITLE_LANGUAGES,
     DEFAULT_SUBTITLE_MODE,
 )
+from .subtitle_proxy import SubtitleProxy, SubtitleProxyError
+
+_LOGGER = logging.getLogger(__name__)
 
 _LANGUAGE_ALIASES = {
     "es": {"es", "spa", "esp", "spanish"},
@@ -90,6 +96,7 @@ def choose_subtitle(
 async def async_prepare_subtitle_track(
     manager: StremioAddonManager,
     server: StremioStreamServerClient,
+    proxy: SubtitleProxy,
     options: Mapping[str, Any],
     media_type: str,
     media_id: str,
@@ -111,18 +118,51 @@ async def async_prepare_subtitle_track(
         options.get(CONF_SUBTITLE_LANGUAGES, DEFAULT_SUBTITLE_LANGUAGES),
     )
     if subtitle is None:
+        _LOGGER.warning(
+            "No subtitle matched preferred languages %s for %s/%s",
+            options.get(CONF_SUBTITLE_LANGUAGES, DEFAULT_SUBTITLE_LANGUAGES),
+            media_type,
+            media_id,
+        )
         return None
     raw_url = str(subtitle["url"])
     convert = bool(
         options.get(CONF_SUBTITLE_CONVERT_VTT, DEFAULT_SUBTITLE_CONVERT_VTT)
     )
     if convert:
-        return {
-            "url": server.build_subtitle_vtt_url(raw_url),
-            "lang": str(subtitle.get("lang") or "und"),
-            "mime": "text/vtt",
-            "provider": subtitle.get("_bridge_addon_name"),
-        }
+        try:
+            proxy_url = await proxy.async_prepare_url(
+                raw_url,
+                str(options.get(CONF_SUBTITLE_BASE_URL, DEFAULT_SUBTITLE_BASE_URL) or ""),
+            )
+            _LOGGER.info(
+                "Prepared %s subtitle for %s/%s through Home Assistant proxy",
+                subtitle.get("lang"),
+                media_type,
+                media_id,
+            )
+            return {
+                "url": proxy_url,
+                "lang": str(subtitle.get("lang") or "und"),
+                "mime": "text/vtt",
+                "provider": subtitle.get("_bridge_addon_name"),
+            }
+        except SubtitleProxyError as err:
+            # Keep compatibility with stream-server variants that expose the Stremio
+            # subtitle conversion endpoint, but make the failure visible in logs.
+            _LOGGER.warning(
+                "Home Assistant subtitle proxy failed for %s/%s: %s; falling back "
+                "to stream-server conversion",
+                media_type,
+                media_id,
+                err,
+            )
+            return {
+                "url": server.build_subtitle_vtt_url(raw_url),
+                "lang": str(subtitle.get("lang") or "und"),
+                "mime": "text/vtt",
+                "provider": subtitle.get("_bridge_addon_name"),
+            }
     lowered = raw_url.lower().split("?", 1)[0]
     mime = "text/vtt" if lowered.endswith(".vtt") else "application/x-subrip"
     return {
@@ -154,6 +194,7 @@ def cast_media_source_payload(
         "app_name": "default_media_receiver",
         "media_id": video_url,
         "media_type": video_mime,
+        "stream_type": "BUFFERED",
     }
     if title:
         payload["title"] = title
@@ -178,7 +219,7 @@ def cast_service_extra(
     thumbnail: str | None = None,
 ) -> dict[str, Any]:
     """Build media_player.play_media extra parameters for Cast."""
-    extra: dict[str, Any] = {}
+    extra: dict[str, Any] = {"stream_type": "BUFFERED"}
     if title or thumbnail:
         metadata: dict[str, Any] = {}
         if title:

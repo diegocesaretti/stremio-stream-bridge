@@ -43,7 +43,8 @@
           "ideal_link_filter": "Enable ideal-link filter",
           "subtitle_mode": "Subtitle mode",
           "subtitle_languages": "Preferred subtitle languages",
-          "subtitle_convert_vtt": "Convert subtitles to WebVTT"
+          "subtitle_convert_vtt": "Convert subtitles to WebVTT",
+          "subtitle_base_url": "Home Assistant subtitle base URL"
         },
         "data_description": {
           "catalog_manifest_urls": "One URL per line.",
@@ -53,7 +54,8 @@
           "ideal_link_filter": "When enabled, automatic playback prefers 1080p, then the highest seeder count, then the smallest file. It overrides Preferred quality.",
           "subtitle_mode": "Automatic loads the first subtitle matching the preferred language list on Google Cast targets.",
           "subtitle_languages": "Comma separated ISO codes in priority order, for example spa, eng.",
-          "subtitle_convert_vtt": "Use stream-server to proxy and convert subtitle files to WebVTT for Cast."
+          "subtitle_convert_vtt": "Downloads and converts subtitles in Home Assistant, then serves a temporary WebVTT URL with CORS. Falls back to stream-server conversion if necessary.",
+          "subtitle_base_url": "Optional. Use the LAN URL reachable by the player, for example http://192.168.1.20:8123. Leave empty for automatic detection."
         }
       }
     },

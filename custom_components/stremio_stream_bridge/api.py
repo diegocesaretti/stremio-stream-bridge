@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 from collections.abc import Mapping
+import logging
 import mimetypes
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
@@ -12,6 +13,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
 REQUEST_TIMEOUT = ClientTimeout(total=20)
+_LOGGER = logging.getLogger(__name__)
 
 
 class StremioBridgeError(Exception):
@@ -114,11 +116,23 @@ class StremioAddonClient:
         extra: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Return subtitle tracks for one movie or episode."""
-        path = f"subtitles/{quote(media_type, safe='')}/{quote(media_id, safe='')}"
+        base_path = f"subtitles/{quote(media_type, safe='')}/{quote(media_id, safe='')}"
+        path = base_path
         if extra:
             extra_value = urlencode(extra)
             path += f"/{quote(extra_value, safe='=&,:%+')}"
-        payload = await self._get_json(f"{self.base_url}/{path}.json")
+        try:
+            payload = await self._get_json(f"{self.base_url}/{path}.json")
+        except StremioConnectionError:
+            if not extra:
+                raise
+            # Some deployed subtitle add-ons declare the standard extras but only
+            # route the plain resource URL. Retry by IMDb/episode id alone.
+            _LOGGER.debug(
+                "Subtitle request with extras failed for %s; retrying without extras",
+                self.manifest_url,
+            )
+            payload = await self._get_json(f"{self.base_url}/{base_path}.json")
         subtitles = payload.get("subtitles", [])
         if not isinstance(subtitles, list):
             raise StremioProtocolError("Subtitle response does not contain a subtitles list")

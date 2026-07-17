@@ -1,4 +1,4 @@
-# Stremio Stream Bridge v0.3.0 for Home Assistant
+# Stremio Stream Bridge v0.3.1 for Home Assistant
 
 Custom Home Assistant integration that combines Stremio-compatible catalog, stream and subtitle add-ons into one browsable media library.
 
@@ -12,21 +12,16 @@ The default setup uses:
 
 Home Assistant does not download or transcode the video. It selects a source, builds the stream-server URL and calls `media_player.play_media` on the selected entity.
 
-## What's new in v0.3.0
+## What's new in v0.3.1
 
-- Subtitle-provider role and default OpenSubtitles v3 manifest.
-- Automatic subtitle selection by language priority.
-- Uses stream filename, video hash and video size hints when available.
-- Optional stream-server conversion/proxy to WebVTT.
-- External subtitle tracks for Home Assistant Google Cast entities.
-- A **Play without subtitles** option in the media browser.
-- **Ideal link filter**:
-  1. applies the configured excluded words and maximum size;
-  2. restricts candidates to 1080p when available;
-  3. chooses the result with the highest number of seeders;
-  4. uses the smallest file as the tie-breaker;
-  5. falls back to 720p, then 4K, then other qualities when no 1080p result exists.
-- Automatic migration from v0.1 and v0.2 entries.
+- Home Assistant now downloads and converts subtitles itself instead of depending only on the stream-server converter.
+- Temporary WebVTT tracks are served from a random, expiring Home Assistant URL with permissive CORS headers.
+- Handles plain, gzip and ZIP subtitles in UTF-8, UTF-16, Windows-1252 and Latin-1.
+- Retries subtitle providers without filename/hash extras when their deployed route rejects extras.
+- Cast playback is explicitly marked as `BUFFERED` instead of `LIVE`.
+- Subtitle-provider failures are visible in logs and in the connectivity sensor attributes.
+- A configurable **Home Assistant subtitle base URL** lets you force the Raspberry Pi LAN address that the Chromecast can reach.
+- Includes the v0.3 ideal-link filter: 1080p, most seeders, then smallest file.
 
 ## Installation or update
 
@@ -85,15 +80,40 @@ Subtitle options:
 
 - mode: `automatic` or `disabled`;
 - preferred languages, for example `spa, eng`;
-- convert/proxy subtitles through stream-server as WebVTT.
+- convert subtitles to WebVTT;
+- optional **Home Assistant subtitle base URL**.
 
-For Google Cast entities, the integration sends the video and external subtitle track to the Cast Default Media Receiver. The stream-server URL looks like:
+For Google Cast entities, Home Assistant downloads the selected subtitle, converts it and exposes a temporary URL such as:
 
 ```text
-http://PC:11470/subtitles.vtt?from=https%3A%2F%2Fsubtitle-source%2Ffile.srt
+http://192.168.1.20:8123/api/stremio_stream_bridge/subtitle/RANDOM_TOKEN.vtt
 ```
 
-Native external subtitle support is currently limited to Home Assistant entities provided by the **Cast** integration. Other media-player integrations receive the video normally but may rely on subtitles embedded in the MKV or on player-specific support.
+Set **Home Assistant subtitle base URL** to the Raspberry Pi LAN URL when automatic detection produces `localhost`, an unreachable hostname, HTTPS with a certificate the receiver does not trust, or the wrong network interface.
+
+Native external subtitle support is currently limited to Home Assistant entities provided by the **Cast** integration. The connectivity sensor exposes `external_subtitles_supported`; it must be `true` for the configured default player. Other media-player integrations receive the video normally but may rely on subtitles embedded in the MKV or on player-specific support.
+
+### Subtitle troubleshooting
+
+After trying playback, inspect **Settings → System → Logs** for `stremio_stream_bridge`. Also open the integration connectivity sensor attributes:
+
+- `external_subtitles_supported`: must be `true`;
+- `subtitle_provider_errors`: should be empty;
+- `default_player`: confirms which entity was evaluated.
+
+The Chromecast must be able to open the configured Home Assistant subtitle base URL directly over the LAN.
+
+Run the diagnostic action before playback:
+
+```yaml
+action: stremio_stream_bridge.subtitle_diagnostics
+data:
+  media_type: movie
+  media_id: tt0133093
+  media_player: media_player.tv_living
+```
+
+The response reports `cast_entity`, subtitle count, available languages, provider errors and the exact temporary `delivery_url`. Open that URL from another device on the LAN to verify that Home Assistant is serving valid WebVTT.
 
 ## Natural Home Assistant workflow
 

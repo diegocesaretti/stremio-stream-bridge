@@ -108,3 +108,46 @@ refresh:
       selector:
         config_entry:
           integration: stremio_stream_bridge
+
+subtitle_diagnostics:
+  name: Diagnosticar subtítulos
+  description: Comprueba proveedor, idioma, conversión WebVTT, URL LAN y compatibilidad Cast sin iniciar la reproducción.
+  fields:
+    entry_id:
+      name: Entrada
+      required: false
+      selector:
+        config_entry:
+          integration: stremio_stream_bridge
+    media_type:
+      name: Tipo
+      description: movie o series.
+      required: true
+      selector:
+        select:
+          options:
+            - movie
+            - series
+    media_id:
+      name: ID de contenido
+      description: Por ejemplo tt0133093 o tt0903747:1:1.
+      required: true
+      selector:
+        text:
+    media_player:
+      name: Reproductor
+      description: Entidad Cast a comprobar. Si se omite, usa la predeterminada.
+      required: false
+      selector:
+        entity:
+          domain: media_player
+    stream_index:
+      name: Índice de stream
+      description: Opcional. Si se omite, usa el enlace ideal.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          mode: box

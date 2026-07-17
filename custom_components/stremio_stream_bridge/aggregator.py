@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import logging
 from typing import Any
 
 from .api import StremioAddonClient, StremioBridgeError, StremioProtocolError
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -49,6 +52,7 @@ class StremioAddonManager:
         self._roles = roles_by_url
         self.addons: list[LoadedAddon] = []
         self.errors: dict[str, str] = {}
+        self.last_subtitle_errors: dict[str, str] = {}
 
     async def async_refresh(self) -> list[LoadedAddon]:
         """Refresh every manifest, retaining all successfully loaded add-ons."""
@@ -195,17 +199,28 @@ class StremioAddonManager:
             and supports_resource(addon.manifest, "subtitles", media_type, media_id)
         ]
         if not providers:
+            self.last_subtitle_errors = {}
             return merged
 
         results = await asyncio.gather(
             *(addon.client.get_subtitles(media_type, media_id, extra) for addon in providers),
             return_exceptions=True,
         )
+        errors: dict[str, str] = {}
         for addon, result in zip(providers, results, strict=True):
             if isinstance(result, BaseException):
+                errors[addon.name] = str(result)
+                _LOGGER.warning(
+                    "Subtitle provider %s failed for %s/%s: %s",
+                    addon.name,
+                    media_type,
+                    media_id,
+                    result,
+                )
                 continue
             for subtitle in result:
                 _append_subtitle(merged, seen, subtitle, addon.name)
+        self.last_subtitle_errors = errors
         return merged
 
     async def search(

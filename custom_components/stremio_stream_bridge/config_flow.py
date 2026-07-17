@@ -41,6 +41,7 @@ from .const import (
     CONF_PREFERRED_QUALITY,
     CONF_STREAM_MANIFEST_URLS,
     CONF_STREAMING_SERVER_URL,
+    CONF_SUBTITLE_BASE_URL,
     CONF_SUBTITLE_CONVERT_VTT,
     CONF_SUBTITLE_LANGUAGES,
     CONF_SUBTITLE_MANIFEST_URLS,
@@ -51,6 +52,7 @@ from .const import (
     DEFAULT_MAX_SIZE_GB,
     DEFAULT_OPENSUBTITLES_MANIFEST,
     DEFAULT_PREFERRED_QUALITY,
+    DEFAULT_SUBTITLE_BASE_URL,
     DEFAULT_SUBTITLE_CONVERT_VTT,
     DEFAULT_SUBTITLE_LANGUAGES,
     DEFAULT_SUBTITLE_MODE,
@@ -290,6 +292,10 @@ class StremioStreamBridgeOptionsFlow(config_entries.OptionsFlowWithReload):
                         CONF_SUBTITLE_CONVERT_VTT, DEFAULT_SUBTITLE_CONVERT_VTT
                     ),
                 ): BooleanSelector(),
+                vol.Optional(
+                    CONF_SUBTITLE_BASE_URL,
+                    default=current.get(CONF_SUBTITLE_BASE_URL, DEFAULT_SUBTITLE_BASE_URL),
+                ): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

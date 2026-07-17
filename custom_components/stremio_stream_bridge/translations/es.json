@@ -43,7 +43,8 @@
           "ideal_link_filter": "Activar filtro de enlace ideal",
           "subtitle_mode": "Modo de subtítulos",
           "subtitle_languages": "Idiomas de subtítulos preferidos",
-          "subtitle_convert_vtt": "Convertir subtítulos a WebVTT"
+          "subtitle_convert_vtt": "Convertir subtítulos a WebVTT",
+          "subtitle_base_url": "URL base de Home Assistant para subtítulos"
         },
         "data_description": {
           "catalog_manifest_urls": "Una URL por línea.",
@@ -53,7 +54,8 @@
           "ideal_link_filter": "Cuando está activo, la reproducción automática prioriza 1080p, luego más semillas y finalmente menor tamaño. Reemplaza la calidad preferida.",
           "subtitle_mode": "Automático carga el primer subtítulo del idioma preferido en destinos Google Cast.",
           "subtitle_languages": "Códigos ISO separados por comas y en orden de prioridad, por ejemplo spa, eng.",
-          "subtitle_convert_vtt": "Usa stream-server para convertir y servir subtítulos como WebVTT para Cast."
+          "subtitle_convert_vtt": "Descarga y convierte el subtítulo en Home Assistant y sirve una URL WebVTT temporal con CORS. Si falla, usa stream-server como respaldo.",
+          "subtitle_base_url": "Opcional. Usá la URL LAN accesible desde el reproductor, por ejemplo http://192.168.1.20:8123. Dejalo vacío para detección automática."
         }
       }
     },

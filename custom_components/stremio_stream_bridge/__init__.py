@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 from typing import Any
 
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import ATTR_ENTITY_ID
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -41,6 +42,9 @@ from .const import (
     CONF_PREFERRED_QUALITY,
     CONF_STREAM_MANIFEST_URLS,
     CONF_STREAMING_SERVER_URL,
+    CONF_SUBTITLE_BASE_URL,
+    CONF_SUBTITLE_CONVERT_VTT,
+    CONF_SUBTITLE_LANGUAGES,
     CONF_SUBTITLE_MANIFEST_URLS,
     DEFAULT_CINEMETA_MANIFEST,
     DEFAULT_EXCLUDE_KEYWORDS,
@@ -48,6 +52,9 @@ from .const import (
     DEFAULT_MAX_SIZE_GB,
     DEFAULT_OPENSUBTITLES_MANIFEST,
     DEFAULT_PREFERRED_QUALITY,
+    DEFAULT_SUBTITLE_BASE_URL,
+    DEFAULT_SUBTITLE_CONVERT_VTT,
+    DEFAULT_SUBTITLE_LANGUAGES,
     DEFAULT_TORRENTIO_MANIFEST,
     DOMAIN,
     PLATFORMS,
@@ -55,14 +62,19 @@ from .const import (
     SERVICE_PLAY_URL,
     SERVICE_REFRESH,
     SERVICE_SEARCH,
+    SERVICE_SUBTITLE_DIAGNOSTICS,
 )
 from .coordinator import StremioBridgeCoordinator
 from .stream_selector import choose_best_stream, choose_ideal_stream
+from .subtitle_proxy import SubtitleProxy, SubtitleProxyError, SubtitleProxyView
 from .subtitle_support import (
     async_prepare_subtitle_track,
     cast_service_extra,
+    choose_subtitle,
     is_cast_player,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -72,6 +84,7 @@ class StremioBridgeRuntime:
     manager: StremioAddonManager
     server: StremioStreamServerClient
     coordinator: StremioBridgeCoordinator
+    subtitle_proxy: SubtitleProxy
     last_search_query: str | None = None
     last_search_results: list[dict[str, Any]] = field(default_factory=list)
 
@@ -105,9 +118,24 @@ SEARCH_SCHEMA = vol.Schema(
     }
 )
 
+SUBTITLE_DIAGNOSTICS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required(ATTR_MEDIA_TYPE): cv.string,
+        vol.Required(ATTR_MEDIA_ID): cv.string,
+        vol.Optional(ATTR_MEDIA_PLAYER): cv.entity_id,
+        vol.Optional(ATTR_STREAM_INDEX): vol.All(vol.Coerce(int), vol.Range(min=0)),
+    }
+)
+
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    """Register integration services."""
+    """Register integration services and the ephemeral subtitle endpoint."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if "subtitle_proxy" not in domain_data:
+        subtitle_proxy = SubtitleProxy(hass, async_get_clientsession(hass))
+        domain_data["subtitle_proxy"] = subtitle_proxy
+        hass.http.register_view(SubtitleProxyView(subtitle_proxy))
 
     async def handle_play(call: ServiceCall) -> None:
         entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
@@ -125,15 +153,23 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         player = _resolve_player(entry, call.data.get(ATTR_MEDIA_PLAYER))
         current = {**entry.data, **entry.options}
         subtitle = None
-        if is_cast_player(hass, player):
+        cast_target = is_cast_player(hass, player)
+        if cast_target:
             subtitle = await async_prepare_subtitle_track(
                 runtime.manager,
                 runtime.server,
+                runtime.subtitle_proxy,
                 current,
                 media_type,
                 media_id,
                 stream,
                 disabled=bool(call.data.get(ATTR_DISABLE_SUBTITLES)),
+            )
+        elif not bool(call.data.get(ATTR_DISABLE_SUBTITLES)):
+            _LOGGER.warning(
+                "External subtitles were skipped because %s is not a Home Assistant "
+                "Cast entity",
+                player,
             )
         title = media_id
         thumbnail = None
@@ -143,7 +179,11 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             thumbnail = meta.get("poster") or meta.get("background")
         except StremioBridgeError:
             pass
-        extra = cast_service_extra(subtitle, title=title, thumbnail=thumbnail)
+        extra = (
+            cast_service_extra(subtitle, title=title, thumbnail=thumbnail)
+            if cast_target
+            else None
+        )
         await _async_play_url(hass, call, player, url, extra=extra)
 
     async def handle_play_url(call: ServiceCall) -> None:
@@ -178,10 +218,79 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             runtime.last_search_query, media_types
         )
 
+    async def handle_subtitle_diagnostics(call: ServiceCall) -> dict[str, Any]:
+        entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
+        runtime: StremioBridgeRuntime = entry.runtime_data
+        media_type = call.data[ATTR_MEDIA_TYPE]
+        media_id = call.data[ATTR_MEDIA_ID]
+        streams = await runtime.manager.get_streams(media_type, media_id)
+        if not streams:
+            return {"ok": False, "error": "No stream provider returned a source"}
+        stream = _select_stream(entry, streams, call.data.get(ATTR_STREAM_INDEX))
+        current = {**entry.data, **entry.options}
+        subtitles = await runtime.manager.get_subtitles(
+            media_type, media_id, None, stream
+        )
+        selected = choose_subtitle(
+            subtitles,
+            current.get(CONF_SUBTITLE_LANGUAGES, DEFAULT_SUBTITLE_LANGUAGES),
+        )
+        player = _resolve_player(entry, call.data.get(ATTR_MEDIA_PLAYER))
+        response: dict[str, Any] = {
+            "ok": selected is not None,
+            "media_type": media_type,
+            "media_id": media_id,
+            "player": player,
+            "cast_entity": is_cast_player(hass, player),
+            "subtitle_count": len(subtitles),
+            "available_languages": sorted(
+                {str(item.get("lang") or "und") for item in subtitles}
+            ),
+            "preferred_languages": current.get(
+                CONF_SUBTITLE_LANGUAGES, DEFAULT_SUBTITLE_LANGUAGES
+            ),
+            "provider_errors": dict(runtime.manager.last_subtitle_errors),
+        }
+        if selected is None:
+            response["error"] = "No subtitle matched the preferred languages"
+            return response
+        raw_url = str(selected["url"])
+        response.update(
+            {
+                "selected_language": selected.get("lang"),
+                "selected_provider": selected.get("_bridge_addon_name"),
+                "source_url": raw_url,
+            }
+        )
+        if bool(current.get(CONF_SUBTITLE_CONVERT_VTT, DEFAULT_SUBTITLE_CONVERT_VTT)):
+            try:
+                response["delivery_url"] = await runtime.subtitle_proxy.async_prepare_url(
+                    raw_url,
+                    str(
+                        current.get(CONF_SUBTITLE_BASE_URL, DEFAULT_SUBTITLE_BASE_URL)
+                        or ""
+                    ),
+                )
+                response["delivery_method"] = "home_assistant_webvtt_proxy"
+            except SubtitleProxyError as err:
+                response["ok"] = False
+                response["error"] = str(err)
+        else:
+            response["delivery_url"] = raw_url
+            response["delivery_method"] = "provider_url"
+        return response
+
     hass.services.async_register(DOMAIN, SERVICE_PLAY, handle_play, schema=PLAY_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_PLAY_URL, handle_play_url, schema=PLAY_URL_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_REFRESH, handle_refresh, schema=REFRESH_SCHEMA)
     hass.services.async_register(DOMAIN, SERVICE_SEARCH, handle_search, schema=SEARCH_SCHEMA)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SUBTITLE_DIAGNOSTICS,
+        handle_subtitle_diagnostics,
+        schema=SUBTITLE_DIAGNOSTICS_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
     return True
 
 
@@ -201,7 +310,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         version = 2
     if version < 3:
         data.setdefault(
-            CONF_SUBTITLE_MANIFEST_URLS,
+            CONF_SUBTITLE_BASE_URL,
+    CONF_SUBTITLE_CONVERT_VTT,
+    CONF_SUBTITLE_LANGUAGES,
+    CONF_SUBTITLE_MANIFEST_URLS,
             parse_manifest_urls([DEFAULT_OPENSUBTITLES_MANIFEST]),
         )
         version = 3
@@ -230,7 +342,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     server = StremioStreamServerClient(session, entry.data[CONF_STREAMING_SERVER_URL])
     coordinator = StremioBridgeCoordinator(hass, manager, server)
     await coordinator.async_config_entry_first_refresh()
-    entry.runtime_data = StremioBridgeRuntime(manager, server, coordinator)
+    subtitle_proxy: SubtitleProxy = hass.data[DOMAIN]["subtitle_proxy"]
+    entry.runtime_data = StremioBridgeRuntime(manager, server, coordinator, subtitle_proxy)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

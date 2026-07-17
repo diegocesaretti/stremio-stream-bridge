@@ -1,0 +1,52 @@
+{
+  "title": "Stremio Stream Bridge",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Create an aggregate Stremio library",
+        "description": "Cinemeta can provide catalogs and metadata, Torrentio or other add-ons provide streams, and the PC stream-server serves video to the selected player.",
+        "data": {
+          "streaming_server_url": "stream-server URL",
+          "catalog_manifest_urls": "Catalog and metadata manifests",
+          "stream_manifest_urls": "Stream manifests",
+          "default_media_player": "Default media player"
+        },
+        "data_description": {
+          "streaming_server_url": "Example: http://192.168.1.50:11470",
+          "catalog_manifest_urls": "One URL per line. Cinemeta is suggested by default.",
+          "stream_manifest_urls": "One URL per line. Torrentio is suggested by default.",
+          "default_media_player": "Chromecast, Android TV or another media_player entity"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not validate stream-server or one of the manifests. Check URLs, network, ports and firewall rules."
+    },
+    "abort": {
+      "already_configured": "A library already exists for this stream-server."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Providers and automatic playback",
+        "data": {
+          "default_media_player": "Default media player",
+          "catalog_manifest_urls": "Catalog and metadata manifests",
+          "stream_manifest_urls": "Stream manifests",
+          "preferred_quality": "Preferred quality",
+          "max_size_gb": "Maximum size in GB (0 = unlimited)",
+          "exclude_keywords": "Excluded keywords"
+        },
+        "data_description": {
+          "catalog_manifest_urls": "One URL per line.",
+          "stream_manifest_urls": "One URL per line.",
+          "exclude_keywords": "Comma separated, for example CAM, TS, HDCAM."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Providers could not be validated. Changes were not saved."
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "title": "Stremio Stream Bridge",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Crear biblioteca Stremio agregada",
+        "description": "Cinemeta puede aportar catálogo y metadatos, Torrentio u otros add-ons aportan streams, y la PC con stream-server sirve el video al reproductor elegido.",
+        "data": {
+          "streaming_server_url": "URL de stream-server",
+          "catalog_manifest_urls": "Manifests de catálogo y metadatos",
+          "stream_manifest_urls": "Manifests de streams",
+          "default_media_player": "Reproductor predeterminado"
+        },
+        "data_description": {
+          "streaming_server_url": "Ejemplo: http://192.168.1.50:11470",
+          "catalog_manifest_urls": "Una URL por línea. Cinemeta viene sugerido por defecto.",
+          "stream_manifest_urls": "Una URL por línea. Torrentio viene sugerido por defecto.",
+          "default_media_player": "Chromecast, Android TV u otra entidad media_player"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo validar stream-server o alguno de los manifiestos. Revisá URLs, red, puertos y firewall."
+    },
+    "abort": {
+      "already_configured": "Ya existe una biblioteca para este stream-server."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Proveedores y reproducción automática",
+        "data": {
+          "default_media_player": "Reproductor predeterminado",
+          "catalog_manifest_urls": "Manifests de catálogo y metadatos",
+          "stream_manifest_urls": "Manifests de streams",
+          "preferred_quality": "Calidad preferida",
+          "max_size_gb": "Tamaño máximo en GB (0 = sin límite)",
+          "exclude_keywords": "Palabras a excluir"
+        },
+        "data_description": {
+          "catalog_manifest_urls": "Una URL por línea.",
+          "stream_manifest_urls": "Una URL por línea.",
+          "exclude_keywords": "Separadas por comas, por ejemplo CAM, TS, HDCAM."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudieron validar los proveedores. Los cambios no fueron guardados."
+    }
+  }
+}

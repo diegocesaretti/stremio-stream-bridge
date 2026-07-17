@@ -1,3 +1,36 @@
+# Stremio Stream Bridge v0.5.0
+
+## Reproducción supervisada y fallback automático
+
+La integración ordena hasta cinco fuentes según compatibilidad con el reproductor, calidad preferida, semillas y tamaño. Cada fuente dispone de un tiempo configurable para alcanzar el estado `playing`; si falla, vuelve a limpiar el reproductor y prueba la siguiente.
+
+Antes de iniciar cada intento, las entidades Google Cast reciben `media_stop` y `turn_off`. En la integración Cast de Home Assistant, `turn_off` cierra la aplicación receptora activa y no apaga físicamente el televisor.
+
+Opciones nuevas:
+
+- **Cerrar completamente el receptor Cast antes de reproducir**: activado por defecto.
+- **Probar fuentes alternativas automáticamente**: activado por defecto.
+- **Cantidad máxima de fuentes**: 5 por defecto, entre 1 y 10.
+- **Tiempo de inicio por fuente**: 15 segundos por defecto.
+- **Notificación persistente de Home Assistant**: activada por defecto cuando se agotan las fuentes.
+- **TvOverlay**: opcional; admite `tvoverlay_ui.notify` y servicios `notify.tvoverlay...`.
+
+Ejemplos de TvOverlay:
+
+```text
+Servicio: tvoverlay_ui.notify
+Destino: living_room_tv  (identificador estable de TvOverlay)
+```
+
+```text
+Servicio: notify.tvoverlaynotify
+Destino: (vacío)
+```
+
+El aviso final incluye el título, la cantidad de fuentes probadas, el último error y la portada cuando está disponible. También se envía cuando las cinco fuentes fallan durante la validación previa, antes de llegar al reproductor.
+
+---
+
 # Stremio Stream Bridge v0.4.4 for Home Assistant
 
 Custom Home Assistant integration that combines Stremio-compatible catalogs, stream providers and subtitles, then sends the selected media through a Stremio stream-server running on a PC.

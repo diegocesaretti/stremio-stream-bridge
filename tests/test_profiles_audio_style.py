@@ -377,3 +377,33 @@ def test_cast_filter_prefers_stereo_aac_over_aac_5_1():
         strict_compatibility=True,
     )
     assert ordered == [stereo]
+
+
+def test_ranked_sources_follow_selected_quality_before_seed_count():
+    selector = load("stream_selector")
+    source_1080 = {
+        "name": "1080p x264 AAC",
+        "title": "900 seeders · 2.0 GB",
+        "behaviorHints": {"filename": "movie.1080p.x264.AAC.mp4"},
+    }
+    source_720 = {
+        "name": "720p x264 AAC",
+        "title": "20 seeders · 1.0 GB",
+        "behaviorHints": {"filename": "movie.720p.x264.AAC.mp4"},
+    }
+    ordered = selector.order_ideal_streams(
+        [source_1080, source_720],
+        12.0,
+        "CAM, TS",
+        preferred_quality="720p",
+        prefer_direct_play=True,
+    )
+    assert ordered[0] is source_720
+
+
+def test_v050_fallback_defaults_are_enabled():
+    assert CONST.DEFAULT_CAST_RESET_BEFORE_PLAY is True
+    assert CONST.DEFAULT_FALLBACK_ENABLED is True
+    assert CONST.DEFAULT_FALLBACK_SOURCE_COUNT == 5
+    assert CONST.DEFAULT_PLAYBACK_START_TIMEOUT == 15
+    assert CONST.DEFAULT_FAILURE_NOTIFY_HA is True

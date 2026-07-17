@@ -49,7 +49,16 @@
           "subtitle_convert_vtt": "Convertir subtítulos a WebVTT",
           "subtitle_base_url": "URL base de Home Assistant para subtítulos",
           "cast_compatibility_filter": "Filtrar formatos compatibles con Google Cast",
-          "stop_before_play": "Detener reproducción actual antes de iniciar"
+          "stop_before_play": "Detener reproducción actual antes de iniciar",
+          "cast_reset_before_play": "Cerrar completamente el receptor Cast antes de reproducir",
+          "fallback_enabled": "Probar fuentes alternativas automáticamente",
+          "fallback_source_count": "Cantidad máxima de fuentes ordenadas a probar",
+          "playback_start_timeout": "Segundos permitidos para que inicie cada fuente",
+          "failure_notify_ha": "Notificar en Home Assistant si fallan todas las fuentes",
+          "tvoverlay_enabled": "Notificar fallas mediante TvOverlay",
+          "tvoverlay_service": "Servicio de TvOverlay",
+          "tvoverlay_target": "Destino de TvOverlay",
+          "tvoverlay_duration": "Duración de TvOverlay en segundos"
         },
         "data_description": {
           "catalog_manifest_urls": "Una URL por línea.",
@@ -67,7 +76,16 @@
           "subtitle_base_url": "URL LAN recomendada y accesible desde Chromecast: {recommended_subtitle_base_url}",
           "streaming_server_url": "Servidor recomendado para esta instalación: {recommended_server_url}",
           "cast_compatibility_filter": "Activado por defecto. Prioriza MP4/H.264/AAC estéreo y descarta MKV, HEVC/x265, DTS, TrueHD, E-AC-3, AC-3 y audio anunciado como 5.1/7.1 cuando existe una alternativa compatible.",
-          "stop_before_play": "Activado por defecto. Envía media_stop al dispositivo seleccionado, espera que cierre el stream anterior y recién después precarga el nuevo enlace."
+          "stop_before_play": "Activado por defecto. Envía media_stop al dispositivo seleccionado, espera que cierre el stream anterior y recién después precarga el nuevo enlace.",
+          "cast_reset_before_play": "En entidades Cast envía media_stop y turn_off, espera que se cierre la app receptora y recién después inicia una sesión limpia. No apaga físicamente el televisor.",
+          "fallback_enabled": "Ordena las mejores fuentes y prueba la siguiente cuando el reproductor no llega al estado playing.",
+          "fallback_source_count": "Por defecto 5. Se ordenan por compatibilidad, calidad preferida, semillas y tamaño.",
+          "playback_start_timeout": "Tiempo máximo que puede quedar cargando cada fuente antes de intentar la siguiente.",
+          "failure_notify_ha": "Crea una notificación persistente con el título, cantidad de fuentes probadas y la portada.",
+          "tvoverlay_enabled": "También envía la falla final a TvOverlay cuando hay un servicio configurado.",
+          "tvoverlay_service": "Ejemplos: tvoverlay_ui.notify o notify.tvoverlaynotify.",
+          "tvoverlay_target": "Opcional. Para tvoverlay_ui escribí el identificador estable del dispositivo. También admite device:, entity:, area:, target: o host:.",
+          "tvoverlay_duration": "Cantidad de segundos que permanece visible el aviso."
         }
       }
     }

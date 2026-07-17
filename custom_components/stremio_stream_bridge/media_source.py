@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from typing import Any
 
 from homeassistant.components.media_player import BrowseError, MediaClass, MediaType
@@ -33,12 +34,16 @@ from .api import StremioBridgeError, StremioProtocolError
 from .const import (
     CONF_CAST_COMPATIBILITY_FILTER,
     CONF_EXCLUDE_KEYWORDS,
+    CONF_FALLBACK_ENABLED,
+    CONF_FALLBACK_SOURCE_COUNT,
     CONF_IDEAL_LINK_FILTER,
     CONF_MAX_SIZE_GB,
     CONF_PLAY_IDEAL_ON_SELECT,
     CONF_PREFERRED_QUALITY,
     DEFAULT_CAST_COMPATIBILITY_FILTER,
     DEFAULT_EXCLUDE_KEYWORDS,
+    DEFAULT_FALLBACK_ENABLED,
+    DEFAULT_FALLBACK_SOURCE_COUNT,
     DEFAULT_IDEAL_LINK_FILTER,
     DEFAULT_MAX_SIZE_GB,
     DEFAULT_PLAY_IDEAL_ON_SELECT,
@@ -49,14 +54,22 @@ from .const import (
     PROFILE_LATIN,
     PROFILE_SPORTS,
 )
-from .playback import prepare_first_playable
+from .failure_notifications import async_notify_playback_failure
+from .playback_supervisor import (
+    async_monitor_initial_and_fallback,
+    async_prepare_candidate,
+    limit_ranked_candidates,
+)
 from .session_control import async_prepare_player_session
 from .stream_selector import choose_best_stream, order_ideal_streams, stream_label
 from .subtitle_support import (
     async_prepare_subtitle_track,
     cast_media_source_payload,
+    cast_service_extra,
     is_cast_player,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 MEDIA_SOURCE_SEARCH_SUPPORTED = (
     SearchMedia is not None and hasattr(MediaSource, "async_search_media")
@@ -121,7 +134,9 @@ class StremioBridgeMediaSource(MediaSource):
             if not streams:
                 raise Unresolvable("No stream provider returned a source")
             current = {**entry.data, **entry.options}
-            cast_target = is_cast_player(self.hass, item.target_media_player)
+            player = item.target_media_player
+            cast_target = is_cast_player(self.hass, player)
+
             if payload.get("selection") == "auto":
                 if profile == PROFILE_SPORTS:
                     candidates = list(streams)
@@ -137,6 +152,11 @@ class StremioBridgeMediaSource(MediaSource):
                             streams,
                             max_size,
                             excluded,
+                            preferred_quality=str(
+                                current.get(
+                                    CONF_PREFERRED_QUALITY, DEFAULT_PREFERRED_QUALITY
+                                )
+                            ),
                             prefer_direct_play=cast_target,
                             strict_compatibility=cast_target
                             and bool(
@@ -157,29 +177,96 @@ class StremioBridgeMediaSource(MediaSource):
                             max_size,
                             excluded,
                         )
-                        candidates = [
-                            selected,
-                            *[stream for stream in streams if stream is not selected],
-                        ]
+                        remaining = order_ideal_streams(
+                            [stream for stream in streams if stream is not selected],
+                            max_size,
+                            excluded,
+                            preferred_quality=str(
+                                current.get(
+                                    CONF_PREFERRED_QUALITY, DEFAULT_PREFERRED_QUALITY
+                                )
+                            ),
+                            prefer_direct_play=cast_target,
+                            strict_compatibility=cast_target
+                            and bool(
+                                current.get(
+                                    CONF_CAST_COMPATIBILITY_FILTER,
+                                    DEFAULT_CAST_COMPATIBILITY_FILTER,
+                                )
+                            ),
+                        )
+                        candidates = [selected, *remaining]
             else:
                 key = str(payload.get("stream_key") or "")
                 selected = find_stream_by_key(streams, key)
                 if selected is None:
-                    raise Unresolvable("That stream is no longer available; reopen the list")
+                    raise Unresolvable(
+                        "That stream is no longer available; reopen the list"
+                    )
                 candidates = [selected]
-            await async_prepare_player_session(
-                self.hass,
-                item.target_media_player,
-                current,
+
+            ranked = limit_ranked_candidates(candidates, current)
+            if not ranked:
+                raise Unresolvable("No ranked stream candidates are available")
+
+            if player:
+                old_task = runtime.playback_tasks.pop(player, None)
+                if old_task is not None and not old_task.done():
+                    old_task.cancel()
+                await async_prepare_player_session(
+                    self.hass,
+                    player,
+                    current,
+                    cast_target=cast_target,
+                )
+
+            prepared = None
+            prepared_index = 0
+            preparation_errors: list[str] = []
+            for index, candidate in enumerate(ranked):
+                try:
+                    prepared = await async_prepare_candidate(
+                        runtime.server,
+                        candidate,
+                        current,
+                        profile=profile,
+                        cast_target=cast_target,
+                    )
+                except StremioBridgeError as err:
+                    preparation_errors.append(
+                        f"{stream_label(candidate)}: validation failed: {err}"
+                    )
+                    continue
+                prepared_index = index
+                break
+
+            title = str(payload.get("name") or payload["id"])
+            poster = payload.get("poster")
+            if prepared is None:
+                if player:
+                    await async_notify_playback_failure(
+                        self.hass,
+                        current,
+                        title=title,
+                        poster=poster,
+                        attempts=len(ranked),
+                        reasons=preparation_errors,
+                    )
+                detail = "; ".join(preparation_errors[-3:])
+                raise Unresolvable(
+                    "All ranked stream URLs failed validation"
+                    + (f": {detail}" if detail else "")
+                )
+
+            active_candidates = ranked[prepared_index:]
+            subtitles_disabled = (
+                payload.get("subtitles") == "off"
+                or profile in {PROFILE_LATIN, PROFILE_SPORTS}
             )
-            stream, url, mime_type = await prepare_first_playable(
-                runtime.server,
-                candidates,
-                current,
-                profile=profile,
-                cast_target=cast_target,
-            )
-            if cast_target:
+
+            async def extra_factory(stream: dict[str, Any]) -> dict[str, Any] | None:
+                if not cast_target:
+                    return None
                 subtitle = await async_prepare_subtitle_track(
                     runtime.manager,
                     runtime.server,
@@ -188,20 +275,76 @@ class StremioBridgeMediaSource(MediaSource):
                     payload["type"],
                     payload["id"],
                     stream,
-                    disabled=(
-                        payload.get("subtitles") == "off"
-                        or profile in {PROFILE_LATIN, PROFILE_SPORTS}
-                    ),
+                    disabled=subtitles_disabled,
                 )
-                cast_payload = cast_media_source_payload(
-                    url,
-                    mime_type,
+                return cast_service_extra(
                     subtitle,
-                    title=payload.get("name"),
-                    thumbnail=payload.get("poster"),
+                    title=title,
+                    thumbnail=poster,
+                )
+
+            subtitle = None
+            if cast_target:
+                subtitle = await async_prepare_subtitle_track(
+                    runtime.manager,
+                    runtime.server,
+                    runtime.subtitle_proxy,
+                    current,
+                    payload["type"],
+                    payload["id"],
+                    prepared.stream,
+                    disabled=subtitles_disabled,
+                )
+
+            if player:
+                task = self.hass.async_create_task(
+                    async_monitor_initial_and_fallback(
+                        self.hass,
+                        runtime.server,
+                        active_candidates[1:],
+                        current,
+                        player=player,
+                        profile=profile,
+                        cast_target=cast_target,
+                        extra_factory=extra_factory,
+                        title=title,
+                        poster=poster,
+                        initial_label=stream_label(prepared.stream),
+                        initial_url=prepared.url,
+                        total_attempts=len(ranked),
+                        initial_attempt_number=prepared_index + 1,
+                        prior_failures=preparation_errors,
+                    ),
+                    f"{DOMAIN} playback fallback for {player}",
+                )
+                runtime.playback_tasks[player] = task
+
+                def _remove_finished(done_task, *, target=player) -> None:
+                    if runtime.playback_tasks.get(target) is done_task:
+                        runtime.playback_tasks.pop(target, None)
+                    if done_task.cancelled():
+                        return
+                    try:
+                        done_task.result()
+                    except Exception as err:  # noqa: BLE001 - background monitor log.
+                        _LOGGER.error(
+                            "Playback fallback monitor failed for %s: %s",
+                            target,
+                            err,
+                        )
+
+                task.add_done_callback(_remove_finished)
+
+            if cast_target:
+                cast_payload = cast_media_source_payload(
+                    prepared.url,
+                    prepared.mime_type,
+                    subtitle,
+                    title=title,
+                    thumbnail=poster,
                 )
                 return PlayMedia(cast_payload, "cast")
-            return PlayMedia(url, mime_type)
+            return PlayMedia(prepared.url, prepared.mime_type)
         except StremioBridgeError as err:
             raise Unresolvable(str(err)) from err
         except (KeyError, ValueError, TypeError, json.JSONDecodeError) as err:
@@ -712,13 +855,24 @@ class StremioBridgeMediaSource(MediaSource):
                 current.get(CONF_IDEAL_LINK_FILTER, DEFAULT_IDEAL_LINK_FILTER)
             )
             profile = str(payload.get("profile") or PROFILE_DEFAULT)
+            fallback_enabled = bool(
+                current.get(CONF_FALLBACK_ENABLED, DEFAULT_FALLBACK_ENABLED)
+            )
+            fallback_count = int(
+                current.get(
+                    CONF_FALLBACK_SOURCE_COUNT, DEFAULT_FALLBACK_SOURCE_COUNT
+                )
+            )
+            fallback_suffix = (
+                f" · hasta {fallback_count} fuentes" if fallback_enabled else ""
+            )
             auto_title = (
-                "▶ Reproducir evento"
+                f"▶ Reproducir evento{fallback_suffix}"
                 if profile == PROFILE_SPORTS
                 else (
-                    "▶ Enlace ideal · 1080p · más semillas · menor tamaño"
+                    f"▶ Enlace ideal{fallback_suffix}"
                     if ideal_enabled
-                    else "▶ Reproducir automáticamente"
+                    else f"▶ Reproducir automáticamente{fallback_suffix}"
                 )
             )
             base_video_payload = {

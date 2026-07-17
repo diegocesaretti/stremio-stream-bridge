@@ -42,11 +42,16 @@ from .const import (
     CONF_AUDIO_MODE,
     CONF_CATALOG_MANIFEST_URLS,
     CONF_CAST_COMPATIBILITY_FILTER,
+    CONF_CAST_RESET_BEFORE_PLAY,
     CONF_DEFAULT_MEDIA_PLAYER,
     CONF_EXCLUDE_KEYWORDS,
+    CONF_FAILURE_NOTIFY_HA,
+    CONF_FALLBACK_ENABLED,
+    CONF_FALLBACK_SOURCE_COUNT,
     CONF_IDEAL_LINK_FILTER,
     CONF_LATIN_MANIFEST_URLS,
     CONF_MAX_SIZE_GB,
+    CONF_PLAYBACK_START_TIMEOUT,
     CONF_PLAY_IDEAL_ON_SELECT,
     CONF_PREFERRED_QUALITY,
     CONF_SPORTS_MANIFEST_URLS,
@@ -58,14 +63,23 @@ from .const import (
     CONF_SUBTITLE_LANGUAGES,
     CONF_SUBTITLE_MANIFEST_URLS,
     CONF_SUBTITLE_MODE,
+    CONF_TVOVERLAY_DURATION,
+    CONF_TVOVERLAY_ENABLED,
+    CONF_TVOVERLAY_SERVICE,
+    CONF_TVOVERLAY_TARGET,
     DEFAULT_AUDIO_MODE,
     DEFAULT_CAST_COMPATIBILITY_FILTER,
+    DEFAULT_CAST_RESET_BEFORE_PLAY,
     DEFAULT_CINEMETA_MANIFEST,
     DEFAULT_EXCLUDE_KEYWORDS,
+    DEFAULT_FAILURE_NOTIFY_HA,
+    DEFAULT_FALLBACK_ENABLED,
+    DEFAULT_FALLBACK_SOURCE_COUNT,
     DEFAULT_IDEAL_LINK_FILTER,
     DEFAULT_LATIN_MANIFEST,
     DEFAULT_MAX_SIZE_GB,
     DEFAULT_OPENSUBTITLES_MANIFEST,
+    DEFAULT_PLAYBACK_START_TIMEOUT,
     DEFAULT_PLAY_IDEAL_ON_SELECT,
     DEFAULT_PREFERRED_QUALITY,
     DEFAULT_SPORTS_MANIFEST,
@@ -75,6 +89,10 @@ from .const import (
     DEFAULT_SUBTITLE_CONVERT_VTT,
     DEFAULT_SUBTITLE_LANGUAGES,
     DEFAULT_SUBTITLE_MODE,
+    DEFAULT_TVOVERLAY_DURATION,
+    DEFAULT_TVOVERLAY_ENABLED,
+    DEFAULT_TVOVERLAY_SERVICE,
+    DEFAULT_TVOVERLAY_TARGET,
     DEFAULT_TORRENTIO_MANIFEST,
     DOMAIN,
     QUALITY_OPTIONS,
@@ -247,7 +265,7 @@ def _description_placeholders(
 class StremioStreamBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle configuration from the Home Assistant UI."""
 
-    VERSION = 7
+    VERSION = 8
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -448,6 +466,83 @@ class StremioStreamBridgeOptionsFlow(config_entries.OptionsFlowWithReload):
                         CONF_STOP_BEFORE_PLAY, DEFAULT_STOP_BEFORE_PLAY
                     ),
                 ): BooleanSelector(),
+                vol.Required(
+                    CONF_CAST_RESET_BEFORE_PLAY,
+                    default=displayed.get(
+                        CONF_CAST_RESET_BEFORE_PLAY,
+                        DEFAULT_CAST_RESET_BEFORE_PLAY,
+                    ),
+                ): BooleanSelector(),
+                vol.Required(
+                    CONF_FALLBACK_ENABLED,
+                    default=displayed.get(
+                        CONF_FALLBACK_ENABLED, DEFAULT_FALLBACK_ENABLED
+                    ),
+                ): BooleanSelector(),
+                vol.Required(
+                    CONF_FALLBACK_SOURCE_COUNT,
+                    default=displayed.get(
+                        CONF_FALLBACK_SOURCE_COUNT, DEFAULT_FALLBACK_SOURCE_COUNT
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1,
+                        max=10,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_PLAYBACK_START_TIMEOUT,
+                    default=displayed.get(
+                        CONF_PLAYBACK_START_TIMEOUT,
+                        DEFAULT_PLAYBACK_START_TIMEOUT,
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=5,
+                        max=60,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_FAILURE_NOTIFY_HA,
+                    default=displayed.get(
+                        CONF_FAILURE_NOTIFY_HA, DEFAULT_FAILURE_NOTIFY_HA
+                    ),
+                ): BooleanSelector(),
+                vol.Required(
+                    CONF_TVOVERLAY_ENABLED,
+                    default=displayed.get(
+                        CONF_TVOVERLAY_ENABLED, DEFAULT_TVOVERLAY_ENABLED
+                    ),
+                ): BooleanSelector(),
+                vol.Optional(
+                    CONF_TVOVERLAY_SERVICE,
+                    default=displayed.get(
+                        CONF_TVOVERLAY_SERVICE, DEFAULT_TVOVERLAY_SERVICE
+                    ),
+                ): TextSelector(TextSelectorConfig(multiline=False)),
+                vol.Optional(
+                    CONF_TVOVERLAY_TARGET,
+                    default=displayed.get(
+                        CONF_TVOVERLAY_TARGET, DEFAULT_TVOVERLAY_TARGET
+                    ),
+                ): TextSelector(TextSelectorConfig(multiline=False)),
+                vol.Required(
+                    CONF_TVOVERLAY_DURATION,
+                    default=displayed.get(
+                        CONF_TVOVERLAY_DURATION, DEFAULT_TVOVERLAY_DURATION
+                    ),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1,
+                        max=60,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
                 vol.Required(
                     CONF_AUDIO_MODE,
                     default=displayed.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE),

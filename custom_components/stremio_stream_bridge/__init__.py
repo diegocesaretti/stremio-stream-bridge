@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 import logging
 from typing import Any
@@ -38,12 +39,17 @@ from .const import (
     CONF_AUDIO_MODE,
     CONF_CATALOG_MANIFEST_URLS,
     CONF_CAST_COMPATIBILITY_FILTER,
+    CONF_CAST_RESET_BEFORE_PLAY,
     CONF_DEFAULT_MEDIA_PLAYER,
     CONF_DEFAULT_STREAM_INDEX,
     CONF_EXCLUDE_KEYWORDS,
+    CONF_FAILURE_NOTIFY_HA,
+    CONF_FALLBACK_ENABLED,
+    CONF_FALLBACK_SOURCE_COUNT,
     CONF_IDEAL_LINK_FILTER,
     CONF_LATIN_MANIFEST_URLS,
     CONF_MAX_SIZE_GB,
+    CONF_PLAYBACK_START_TIMEOUT,
     CONF_PREFERRED_QUALITY,
     CONF_SPORTS_MANIFEST_URLS,
     CONF_STREAM_MANIFEST_URLS,
@@ -53,14 +59,23 @@ from .const import (
     CONF_SUBTITLE_CONVERT_VTT,
     CONF_SUBTITLE_LANGUAGES,
     CONF_SUBTITLE_MANIFEST_URLS,
+    CONF_TVOVERLAY_DURATION,
+    CONF_TVOVERLAY_ENABLED,
+    CONF_TVOVERLAY_SERVICE,
+    CONF_TVOVERLAY_TARGET,
     DEFAULT_AUDIO_MODE,
     DEFAULT_CAST_COMPATIBILITY_FILTER,
+    DEFAULT_CAST_RESET_BEFORE_PLAY,
     DEFAULT_CINEMETA_MANIFEST,
     DEFAULT_EXCLUDE_KEYWORDS,
+    DEFAULT_FAILURE_NOTIFY_HA,
+    DEFAULT_FALLBACK_ENABLED,
+    DEFAULT_FALLBACK_SOURCE_COUNT,
     DEFAULT_IDEAL_LINK_FILTER,
     DEFAULT_LATIN_MANIFEST,
     DEFAULT_MAX_SIZE_GB,
     DEFAULT_OPENSUBTITLES_MANIFEST,
+    DEFAULT_PLAYBACK_START_TIMEOUT,
     DEFAULT_PREFERRED_QUALITY,
     DEFAULT_SPORTS_MANIFEST,
     DEFAULT_STOP_BEFORE_PLAY,
@@ -68,6 +83,10 @@ from .const import (
     DEFAULT_SUBTITLE_CONVERT_VTT,
     DEFAULT_SUBTITLE_LANGUAGES,
     DEFAULT_TORRENTIO_MANIFEST,
+    DEFAULT_TVOVERLAY_DURATION,
+    DEFAULT_TVOVERLAY_ENABLED,
+    DEFAULT_TVOVERLAY_SERVICE,
+    DEFAULT_TVOVERLAY_TARGET,
     DOMAIN,
     PLATFORMS,
     PROFILE_DEFAULT,
@@ -81,7 +100,7 @@ from .const import (
     SERVICE_SUBTITLE_DIAGNOSTICS,
 )
 from .coordinator import StremioBridgeCoordinator
-from .playback import prepare_first_playable
+from .playback_supervisor import async_play_ranked_candidates
 from .session_control import async_prepare_player_session
 from .stream_selector import choose_best_stream, choose_ideal_stream, order_ideal_streams
 from .subtitle_proxy import SubtitleProxy, SubtitleProxyError, SubtitleProxyView
@@ -105,6 +124,7 @@ class StremioBridgeRuntime:
     subtitle_proxy: SubtitleProxy
     last_search_query: str | None = None
     last_search_results: list[dict[str, Any]] = field(default_factory=list)
+    playback_tasks: dict[str, asyncio.Task[Any]] = field(default_factory=dict)
 
 
 PLAY_SCHEMA = vol.Schema(
@@ -166,9 +186,59 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         streams = await runtime.manager.get_streams(media_type, media_id, profile)
         if not streams:
             raise HomeAssistantError("No stream provider returned a playable source")
+
         current = {**entry.data, **entry.options}
         player = _resolve_player(entry, call.data.get(ATTR_MEDIA_PLAYER))
         cast_target = is_cast_player(hass, player)
+        _cancel_playback_task(runtime, player)
+
+        title = media_id
+        thumbnail = None
+        try:
+            meta = await runtime.manager.get_meta(
+                media_type,
+                media_id.split(":", 1)[0],
+                profile,
+            )
+            title = str(meta.get("name") or meta.get("title") or media_id)
+            thumbnail = meta.get("poster") or meta.get("background")
+        except StremioBridgeError:
+            pass
+
+        subtitles_disabled = bool(call.data.get(ATTR_DISABLE_SUBTITLES)) or profile in {
+            PROFILE_LATIN,
+            PROFILE_SPORTS,
+        }
+        warned_non_cast = False
+
+        async def extra_factory(stream: dict[str, Any]) -> dict[str, Any] | None:
+            nonlocal warned_non_cast
+            if not cast_target:
+                if not subtitles_disabled and not warned_non_cast:
+                    warned_non_cast = True
+                    _LOGGER.warning(
+                        "External subtitles were skipped because %s is not a Home "
+                        "Assistant Cast entity",
+                        player,
+                    )
+                return None
+            subtitle = None
+            if not subtitles_disabled:
+                subtitle = await async_prepare_subtitle_track(
+                    runtime.manager,
+                    runtime.server,
+                    runtime.subtitle_proxy,
+                    current,
+                    media_type,
+                    media_id,
+                    stream,
+                )
+            return cast_service_extra(
+                subtitle,
+                title=title,
+                thumbnail=thumbnail,
+            )
+
         try:
             candidates = _stream_candidates(
                 entry,
@@ -184,67 +254,21 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
                     )
                 ),
             )
-            await async_prepare_player_session(
+            await async_play_ranked_candidates(
                 hass,
-                player,
-                current,
-                context=call.context,
-            )
-            stream, url, mime_type = await prepare_first_playable(
                 runtime.server,
                 candidates,
                 current,
+                player=player,
                 profile=profile,
                 cast_target=cast_target,
+                extra_factory=extra_factory,
+                title=title,
+                poster=thumbnail,
+                context=call.context,
             )
         except (StremioBridgeError, ValueError) as err:
             raise HomeAssistantError(str(err)) from err
-        subtitle = None
-        subtitles_disabled = bool(call.data.get(ATTR_DISABLE_SUBTITLES)) or profile in {
-            PROFILE_LATIN,
-            PROFILE_SPORTS,
-        }
-        if cast_target and not subtitles_disabled:
-            subtitle = await async_prepare_subtitle_track(
-                runtime.manager,
-                runtime.server,
-                runtime.subtitle_proxy,
-                current,
-                media_type,
-                media_id,
-                stream,
-            )
-        elif not subtitles_disabled and not cast_target:
-            _LOGGER.warning(
-                "External subtitles were skipped because %s is not a Home Assistant "
-                "Cast entity",
-                player,
-            )
-        title = media_id
-        thumbnail = None
-        try:
-            meta = await runtime.manager.get_meta(
-                media_type,
-                media_id.split(":", 1)[0],
-                profile,
-            )
-            title = str(meta.get("name") or meta.get("title") or media_id)
-            thumbnail = meta.get("poster") or meta.get("background")
-        except StremioBridgeError:
-            pass
-        extra = (
-            cast_service_extra(subtitle, title=title, thumbnail=thumbnail)
-            if cast_target
-            else None
-        )
-        await _async_play_url(
-            hass,
-            call,
-            player,
-            url,
-            mime_type=mime_type,
-            extra=extra,
-        )
 
     async def handle_play_url(call: ServiceCall) -> None:
         entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
@@ -262,10 +286,12 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             raise HomeAssistantError("play_url accepts HTTP(S) URLs or magnet URIs")
         player = _resolve_player(entry, call.data.get(ATTR_MEDIA_PLAYER))
         current = {**entry.data, **entry.options}
+        _cancel_playback_task(runtime, player)
         await async_prepare_player_session(
             hass,
             player,
             current,
+            cast_target=is_cast_player(hass, player),
             context=call.context,
         )
         await _async_play_url(hass, call, player, url)
@@ -410,6 +436,19 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         options.setdefault(CONF_STOP_BEFORE_PLAY, DEFAULT_STOP_BEFORE_PLAY)
         version = 7
+    if version < 8:
+        options.setdefault(CONF_CAST_RESET_BEFORE_PLAY, DEFAULT_CAST_RESET_BEFORE_PLAY)
+        options.setdefault(CONF_FALLBACK_ENABLED, DEFAULT_FALLBACK_ENABLED)
+        options.setdefault(CONF_FALLBACK_SOURCE_COUNT, DEFAULT_FALLBACK_SOURCE_COUNT)
+        options.setdefault(
+            CONF_PLAYBACK_START_TIMEOUT, DEFAULT_PLAYBACK_START_TIMEOUT
+        )
+        options.setdefault(CONF_FAILURE_NOTIFY_HA, DEFAULT_FAILURE_NOTIFY_HA)
+        options.setdefault(CONF_TVOVERLAY_ENABLED, DEFAULT_TVOVERLAY_ENABLED)
+        options.setdefault(CONF_TVOVERLAY_SERVICE, DEFAULT_TVOVERLAY_SERVICE)
+        options.setdefault(CONF_TVOVERLAY_TARGET, DEFAULT_TVOVERLAY_TARGET)
+        options.setdefault(CONF_TVOVERLAY_DURATION, DEFAULT_TVOVERLAY_DURATION)
+        version = 8
     hass.config_entries.async_update_entry(
         entry, data=data, options=options, version=version
     )
@@ -458,6 +497,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        runtime = entry.runtime_data
+        if runtime is not None:
+            for task in runtime.playback_tasks.values():
+                task.cancel()
+            runtime.playback_tasks.clear()
         entry.runtime_data = None
     return unload_ok
 
@@ -494,6 +538,9 @@ def _stream_candidates(
             streams,
             max_size,
             excluded,
+            preferred_quality=str(
+                current.get(CONF_PREFERRED_QUALITY, DEFAULT_PREFERRED_QUALITY)
+            ),
             prefer_direct_play=prefer_direct_play,
             strict_compatibility=strict_compatibility,
         )
@@ -504,7 +551,17 @@ def _stream_candidates(
         max_size,
         excluded,
     )
-    return [selected, *[stream for stream in streams if stream is not selected]]
+    remaining = order_ideal_streams(
+        [stream for stream in streams if stream is not selected],
+        max_size,
+        excluded,
+        preferred_quality=str(
+            current.get(CONF_PREFERRED_QUALITY, DEFAULT_PREFERRED_QUALITY)
+        ),
+        prefer_direct_play=prefer_direct_play,
+        strict_compatibility=strict_compatibility,
+    )
+    return [selected, *remaining]
 
 
 def _select_stream(
@@ -543,6 +600,14 @@ def _select_stream(
 def find_stream_by_key(streams: list[dict[str, Any]], key: str) -> dict[str, Any] | None:
     """Find a selected stream after re-querying providers."""
     return next((stream for stream in streams if stream_key(stream) == key), None)
+
+
+def _cancel_playback_task(runtime: StremioBridgeRuntime, player: str) -> None:
+    """Cancel an older media-source fallback monitor for the same player."""
+    task = runtime.playback_tasks.pop(player, None)
+    if task is not None and not task.done():
+        task.cancel()
+
 
 
 def _loaded_entries(hass: HomeAssistant) -> list[ConfigEntry]:

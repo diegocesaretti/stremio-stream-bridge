@@ -286,13 +286,14 @@ def order_ideal_streams(
     max_size_gb: float,
     exclude_keywords: str,
     *,
+    preferred_quality: str = "1080p",
     prefer_direct_play: bool = False,
     strict_compatibility: bool = False,
 ) -> list[dict[str, Any]]:
     """Rank all usable links for automatic playback and fallback.
 
-    1080p stays first, then 720p, 4K, 480p, 360p and unknown qualities.
-    Within each quality bucket, more seeders win and smaller files break ties.
+    Compatibility is applied first when requested, then the configured quality,
+    seed count and file size. The returned order is also the retry order.
     """
     if not streams:
         return []
@@ -301,7 +302,22 @@ def order_ideal_streams(
         compatible = [stream for stream in candidates if cast_compatibility_tier(stream) < 2]
         if compatible:
             candidates = compatible
-    quality_order = {1080: 0, 720: 1, 2160: 2, 480: 3, 360: 4, 0: 5}
+    target_map = {"2160p": 2160, "1080p": 1080, "720p": 720, "480p": 480}
+    target = target_map.get(preferred_quality)
+
+    def quality_rank(quality: int) -> tuple[int, int]:
+        if preferred_quality == "lowest":
+            return (0 if quality else 1, quality or 9999)
+        if target is not None:
+            if quality == target:
+                return (0, 0)
+            if 0 < quality < target:
+                return (1, target - quality)
+            if quality > target:
+                return (2, quality - target)
+            return (3, 9999)
+        # auto: prefer the highest known quality.
+        return (0 if quality else 1, -quality)
 
     def rank(stream: dict[str, Any]) -> tuple[Any, ...]:
         size = parse_size_gb(stream)
@@ -310,7 +326,7 @@ def order_ideal_streams(
         )
         return (
             *compatibility,
-            quality_order.get(parse_quality(stream), 6),
+            *quality_rank(parse_quality(stream)),
             -parse_seeders(stream),
             size if size is not None else 9999,
             stream_key(stream),

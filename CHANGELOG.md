@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+- Verifica que el reproductor seleccionado no siga reproduciendo contenido anterior.
+- En Google Cast, detiene el medio, cierra la app receptora y espera estado inactivo antes de cada intento.
+- Ordena y conserva las mejores fuentes según compatibilidad, calidad seleccionada, semillas y tamaño.
+- Prueba automáticamente hasta cinco fuentes, con cantidad y timeout configurables.
+- Supervisa también reproducciones iniciadas desde el navegador multimedia de Home Assistant.
+- Cancela supervisores anteriores cuando se inicia una nueva reproducción en el mismo dispositivo.
+- Crea una notificación persistente de Home Assistant cuando se agotan todas las fuentes.
+- Añade notificaciones opcionales mediante TvOverlay con portada.
+- Expone el estado de fallback y limpieza Cast en el sensor de conectividad.
+
 ## 0.4.4
 
 - Added a Cast compatibility filter, enabled by default. Automatic playback now prefers MP4/H.264/AAC and removes known-incompatible MKV, AVI, HEVC/x265, AV1, DTS, TrueHD, E-AC-3, AC-3 and advertised 5.1/7.1 audio candidates whenever a safer alternative exists.

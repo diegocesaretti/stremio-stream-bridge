@@ -15,11 +15,21 @@ from . import StremioBridgeRuntime
 from .const import (
     CONF_AUDIO_MODE,
     CONF_CAST_COMPATIBILITY_FILTER,
+    CONF_CAST_RESET_BEFORE_PLAY,
     CONF_DEFAULT_MEDIA_PLAYER,
+    CONF_FAILURE_NOTIFY_HA,
+    CONF_FALLBACK_ENABLED,
+    CONF_FALLBACK_SOURCE_COUNT,
+    CONF_PLAYBACK_START_TIMEOUT,
     CONF_PLAY_IDEAL_ON_SELECT,
     CONF_STOP_BEFORE_PLAY,
     DEFAULT_AUDIO_MODE,
     DEFAULT_CAST_COMPATIBILITY_FILTER,
+    DEFAULT_CAST_RESET_BEFORE_PLAY,
+    DEFAULT_FAILURE_NOTIFY_HA,
+    DEFAULT_FALLBACK_ENABLED,
+    DEFAULT_FALLBACK_SOURCE_COUNT,
+    DEFAULT_PLAYBACK_START_TIMEOUT,
     DEFAULT_PLAY_IDEAL_ON_SELECT,
     DEFAULT_STOP_BEFORE_PLAY,
     DOMAIN,
@@ -70,6 +80,9 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
         errors = data.get("addon_errors", {})
         default_player = self._entry.options.get(
             CONF_DEFAULT_MEDIA_PLAYER,
+    CONF_FAILURE_NOTIFY_HA,
+    CONF_FALLBACK_ENABLED,
+    CONF_FALLBACK_SOURCE_COUNT,
             self._entry.data.get(CONF_DEFAULT_MEDIA_PLAYER),
         )
         current = {**self._entry.data, **self._entry.options}
@@ -88,6 +101,21 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
             ),
             "stop_before_play": current.get(
                 CONF_STOP_BEFORE_PLAY, DEFAULT_STOP_BEFORE_PLAY
+            ),
+            "cast_reset_before_play": current.get(
+                CONF_CAST_RESET_BEFORE_PLAY, DEFAULT_CAST_RESET_BEFORE_PLAY
+            ),
+            "fallback_enabled": current.get(
+                CONF_FALLBACK_ENABLED, DEFAULT_FALLBACK_ENABLED
+            ),
+            "fallback_source_count": current.get(
+                CONF_FALLBACK_SOURCE_COUNT, DEFAULT_FALLBACK_SOURCE_COUNT
+            ),
+            "playback_start_timeout": current.get(
+                CONF_PLAYBACK_START_TIMEOUT, DEFAULT_PLAYBACK_START_TIMEOUT
+            ),
+            "failure_notify_ha": current.get(
+                CONF_FAILURE_NOTIFY_HA, DEFAULT_FAILURE_NOTIFY_HA
             ),
             "direct_ideal_on_select": current.get(
                 CONF_PLAY_IDEAL_ON_SELECT, DEFAULT_PLAY_IDEAL_ON_SELECT

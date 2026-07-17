@@ -1,71 +1,77 @@
-# Changelog
+"""Tests for the pre-playback player stop/session release helper."""
 
-## 0.4.3
+import asyncio
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+import sys
+import types
 
-- Restored direct stream playback as the default and migrated v0.4 automatic entries back to direct.
-- Kept `automatic` as a backwards-compatible direct-playback alias.
-- Limited `hlsv2` conversion to explicit `force_transcode` mode.
-- Added real validation for generated `hlsv2` playlists.
-- Falls back to the original direct stream whenever HLS audio conversion fails.
+ROOT = Path(__file__).parents[1] / "custom_components" / "stremio_stream_bridge"
+PACKAGE = "stremio_stream_bridge_session_test"
+pkg = types.ModuleType(PACKAGE)
+pkg.__path__ = [str(ROOT)]
+sys.modules[PACKAGE] = pkg
 
-## 0.4.2
+ha = types.ModuleType("homeassistant")
+ha_const = types.ModuleType("homeassistant.const")
+ha_const.ATTR_ENTITY_ID = "entity_id"
+ha_core = types.ModuleType("homeassistant.core")
+ha_core.HomeAssistant = object
+sys.modules.setdefault("homeassistant", ha)
+sys.modules["homeassistant.const"] = ha_const
+sys.modules["homeassistant.core"] = ha_core
 
-- Fixed configured Stremio manifest URLs containing commas being split into invalid fragments.
-- Optional subtitle, Latin Audio and Sports provider outages no longer cause the whole options form to fail with `cannot_connect`.
-- Added migration version 5, preloading Latin Audio and F1/Sports manifests when older entries stored them as empty.
-- Added the stream-server URL to the options form and prefilled this installation's known PC address (`http://192.168.1.145:11470`).
-- Added automatic Home Assistant LAN URL recommendation for subtitle delivery.
-- Preserved explicitly empty optional provider lists after migration so profiles can still be disabled intentionally.
-- Improved configuration errors to distinguish a main stream-server connection failure from invalid core manifests.
 
-## 0.4.1
+def load(name: str):
+    spec = spec_from_file_location(f"{PACKAGE}.{name}", ROOT / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
-- Fix HLS/DASH MIME detection: the resolved `.m3u8`/`.mpd` URL now takes precedence over an add-on filename hint.
-- Validate proxied HLS manifests before casting and automatically fall back to the next ranked source when a link is dead.
-- Sports automatic playback no longer blindly trusts the first stream returned by the add-on.
-- Add clearer debug logging for selected stream, MIME type and fallback decisions.
 
-## 0.4.0
+CONST = load("const")
+SESSION = load("session_control")
 
-- Removed black subtitle outlines/background windows on Google Cast.
-- Added automatic H.264/AAC HLS compatibility mode to fix silent audio.
-- Added direct ideal-link playback on item selection, enabled by default.
-- Added separate configurable Latin Audio and F1/Sports provider profiles.
-- Latin and sports profiles automatically disable external subtitles.
-- Added sports catalog browsing and Latin catalog mirroring.
-- Added profile selection to the `play` action.
-- Fixed migration from older config-entry versions.
 
-## 0.3.1
+class FakeStateMachine:
+    def get(self, _entity_id):
+        return types.SimpleNamespace(state="playing")
 
-- Fixed external subtitles failing silently.
-- Added Home Assistant-hosted temporary WebVTT proxy with CORS.
-- Added gzip/ZIP, UTF-8, UTF-16, Windows-1252 and Latin-1 subtitle decoding.
-- Added fallback retry without Stremio subtitle extras.
-- Marked Cast video playback as BUFFERED instead of LIVE.
-- Added subtitle provider errors and Cast compatibility to the connectivity sensor.
-- Added an optional LAN subtitle base URL for receivers that cannot resolve Home Assistant automatically.
 
-## 0.3.0
+class FakeServices:
+    def __init__(self):
+        self.calls = []
 
-- Added subtitle add-on aggregation and OpenSubtitles v3 default configuration.
-- Added preferred subtitle languages and automatic subtitle selection.
-- Added optional stream-server WebVTT conversion/proxy.
-- Added Google Cast external subtitle-track playback.
-- Added per-playback subtitle disable option.
-- Added ideal-link filter: prefer 1080p, highest seed count, then smallest file.
-- Added migration from v0.2 to subtitle-capable configuration.
+    async def async_call(self, domain, service, data, **kwargs):
+        self.calls.append((domain, service, data, kwargs))
 
-## 0.2.0
 
-- Aggregate catalog, metadata and stream providers.
-- Default Cinemeta + Torrentio configuration.
-- Movies/series hierarchy, seasons and episodes.
-- Genre/year filters and pagination.
-- Automatic and manual stream selection.
-- Search service and forward-compatible native media-source search.
-- Migration from v0.1 single-add-on entries.
+async def _run_stop_test():
+    services = FakeServices()
+    hass = types.SimpleNamespace(states=FakeStateMachine(), services=services)
+    original_sleep = asyncio.sleep
 
-## 0.1.0
+    async def no_sleep(_delay):
+        return None
 
-- Initial single add-on and stream-server bridge.
+    SESSION.asyncio.sleep = no_sleep
+    try:
+        stopped = await SESSION.async_prepare_player_session(
+            hass,
+            "media_player.tv",
+            {CONST.CONF_STOP_BEFORE_PLAY: True},
+        )
+    finally:
+        SESSION.asyncio.sleep = original_sleep
+    assert stopped is True
+    assert services.calls[0][0:3] == (
+        "media_player",
+        "media_stop",
+        {"entity_id": "media_player.tv"},
+    )
+
+
+def test_current_player_is_stopped_before_new_stream():
+    asyncio.run(_run_stop_test())

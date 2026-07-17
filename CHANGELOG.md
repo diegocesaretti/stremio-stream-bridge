@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2
+
+- Fixed configured Stremio manifest URLs containing commas being split into invalid fragments.
+- Optional subtitle, Latin Audio and Sports provider outages no longer cause the whole options form to fail with `cannot_connect`.
+- Added migration version 5, preloading Latin Audio and F1/Sports manifests when older entries stored them as empty.
+- Added the stream-server URL to the options form and prefilled this installation's known PC address (`http://192.168.1.145:11470`).
+- Added automatic Home Assistant LAN URL recommendation for subtitle delivery.
+- Preserved explicitly empty optional provider lists after migration so profiles can still be disabled intentionally.
+- Improved configuration errors to distinguish a main stream-server connection failure from invalid core manifests.
+
 ## 0.4.1
 
 - Fix HLS/DASH MIME detection: the resolved `.m3u8`/`.mpd` URL now takes precedence over an add-on filename hint.

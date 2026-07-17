@@ -394,11 +394,13 @@ def guess_stream_mime_type(stream: Mapping[str, Any], resolved_url: str) -> str:
 
 
 def parse_manifest_urls(value: object) -> list[str]:
-    """Parse manifest URLs stored as a list or entered one per line/comma."""
+    """Parse manifest URLs stored as a list or entered one per line."""
     if isinstance(value, list):
         raw_values = [str(item) for item in value]
     elif isinstance(value, str):
-        raw_values = value.replace(",", "\n").splitlines()
+        # Stremio configured manifest URLs commonly contain commas inside their
+        # encoded provider/language settings. Treat only line breaks as separators.
+        raw_values = value.splitlines()
     else:
         raw_values = []
     result: list[str] = []

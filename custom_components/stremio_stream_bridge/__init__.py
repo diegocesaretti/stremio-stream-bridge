@@ -53,9 +53,12 @@ from .const import (
     DEFAULT_CINEMETA_MANIFEST,
     DEFAULT_EXCLUDE_KEYWORDS,
     DEFAULT_IDEAL_LINK_FILTER,
+    DEFAULT_LATIN_MANIFEST,
     DEFAULT_MAX_SIZE_GB,
     DEFAULT_OPENSUBTITLES_MANIFEST,
     DEFAULT_PREFERRED_QUALITY,
+    DEFAULT_SPORTS_MANIFEST,
+    DEFAULT_STREAMING_SERVER_URL,
     DEFAULT_SUBTITLE_CONVERT_VTT,
     DEFAULT_SUBTITLE_LANGUAGES,
     DEFAULT_TORRENTIO_MANIFEST,
@@ -333,8 +336,9 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate older entries to the multi-profile v0.4 format."""
+    """Migrate older entries and repair v0.4 optional-provider defaults."""
     data = dict(entry.data)
+    options = dict(entry.options)
     version = entry.version
     if version < 2:
         legacy_url = data.get(CONF_ADDON_MANIFEST_URL)
@@ -356,7 +360,17 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data.setdefault(CONF_LATIN_MANIFEST_URLS, [])
         data.setdefault(CONF_SPORTS_MANIFEST_URLS, [])
         version = 4
-    hass.config_entries.async_update_entry(entry, data=data, version=version)
+    if version < 5:
+        current = {**data, **options}
+        if not parse_manifest_urls(current.get(CONF_LATIN_MANIFEST_URLS, [])):
+            options[CONF_LATIN_MANIFEST_URLS] = [DEFAULT_LATIN_MANIFEST]
+        if not parse_manifest_urls(current.get(CONF_SPORTS_MANIFEST_URLS, [])):
+            options[CONF_SPORTS_MANIFEST_URLS] = [DEFAULT_SPORTS_MANIFEST]
+        data.setdefault(CONF_STREAMING_SERVER_URL, DEFAULT_STREAMING_SERVER_URL)
+        version = 5
+    hass.config_entries.async_update_entry(
+        entry, data=data, options=options, version=version
+    )
     return True
 
 
@@ -373,8 +387,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     subtitle_urls = parse_manifest_urls(
         current.get(CONF_SUBTITLE_MANIFEST_URLS, [DEFAULT_OPENSUBTITLES_MANIFEST])
     )
-    latin_urls = parse_manifest_urls(current.get(CONF_LATIN_MANIFEST_URLS, []))
-    sports_urls = parse_manifest_urls(current.get(CONF_SPORTS_MANIFEST_URLS, []))
+    latin_urls = parse_manifest_urls(
+        current.get(CONF_LATIN_MANIFEST_URLS, [DEFAULT_LATIN_MANIFEST])
+    )
+    sports_urls = parse_manifest_urls(
+        current.get(CONF_SPORTS_MANIFEST_URLS, [DEFAULT_SPORTS_MANIFEST])
+    )
     manager = StremioAddonManager(
         [StremioAddonClient(session, url) for url in catalog_urls],
         [StremioAddonClient(session, url) for url in stream_urls],
@@ -382,7 +400,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         [StremioAddonClient(session, url) for url in latin_urls],
         [StremioAddonClient(session, url) for url in sports_urls],
     )
-    server = StremioStreamServerClient(session, entry.data[CONF_STREAMING_SERVER_URL])
+    server_url = str(
+        current.get(CONF_STREAMING_SERVER_URL, DEFAULT_STREAMING_SERVER_URL)
+    )
+    server = StremioStreamServerClient(session, server_url)
     coordinator = StremioBridgeCoordinator(hass, manager, server)
     await coordinator.async_config_entry_first_refresh()
     subtitle_proxy: SubtitleProxy = hass.data[DOMAIN]["subtitle_proxy"]

@@ -1,6 +1,24 @@
-# Stremio Stream Bridge v0.4.1 for Home Assistant
+# Stremio Stream Bridge v0.4.2 for Home Assistant
 
 Custom Home Assistant integration that combines Stremio-compatible catalogs, stream providers and subtitles, then sends the selected media through a Stremio stream-server running on a PC.
+
+## v0.4.2 configuration repair
+
+- Fixes the false **cannot connect** error caused by temporary failures in optional subtitle, Latin Audio or Sports add-ons. Only the main PC stream-server and the core catalog/stream providers are mandatory.
+- Fixes configured manifest URLs containing commas, such as Torrentio language/provider settings, being split into broken URLs.
+- Older v0.4 entries with empty optional profiles are migrated automatically and receive prefilled Latin Audio and Sports manifests.
+- The PC stream-server URL is now editable from **Configure** and defaults to the address already used by this installation: `http://192.168.1.145:11470`.
+- The subtitle base field recommends the Raspberry Pi/Home Assistant LAN URL detected through the route to the PC.
+
+Recommended prefilled optional profiles:
+
+```text
+Latin Audio:
+https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,rutracker,mejortorrent,cinecalidad|sort=size|language=spanish,latino|qualityfilter=brremux,hdrall,dolbyvision,4k/manifest.json
+
+F1 and Sports:
+https://stremverse1.alwaysdata.net/manifest.json
+```
 
 ## v0.4.1 Cast hotfix
 
@@ -22,7 +40,7 @@ Custom Home Assistant integration that combines Stremio-compatible catalogs, str
 1. Copy `custom_components/stremio_stream_bridge` to `/config/custom_components/`.
 2. Replace the existing folder when updating.
 3. Restart Home Assistant.
-4. Keep the existing config entry; it migrates automatically to version 4.
+4. Keep the existing config entry; it migrates automatically to version 5.
 5. Open **Settings → Devices & services → Stremio Stream Bridge → Configure**.
 
 ## Default profile
@@ -130,5 +148,5 @@ data:
 - The PC stream-server must be reachable from Home Assistant and from the playback device.
 - HLS audio compatibility depends on FFmpeg/transcoding support in the stream-server build.
 - External subtitles are applied only to Home Assistant entities belonging to the Cast integration.
-- Public add-ons can change or disappear; configurable manifest fields are intentionally used instead of hard-coding a specific Latin or sports service.
+- Public add-ons can change or disappear. Optional-provider failures are shown in the connectivity sensor but no longer prevent the core integration from loading.
 - Use media and providers only where you have the right to access and reproduce the content.

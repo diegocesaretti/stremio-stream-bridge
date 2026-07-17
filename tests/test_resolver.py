@@ -75,3 +75,11 @@ def test_subtitle_vtt_url() -> None:
     url = client.build_subtitle_vtt_url("https://subs.example/movie.srt?token=abc")
     assert url.startswith("http://server:11470/subtitles.vtt?from=")
     assert "https%3A%2F%2Fsubs.example%2Fmovie.srt%3Ftoken%3Dabc" in url
+
+
+def test_configured_manifest_url_with_commas_stays_single_url() -> None:
+    url = (
+        "https://torrentio.strem.fun/"
+        "providers=yts,eztv,1337x|language=spanish,latino/manifest.json"
+    )
+    assert API.parse_manifest_urls(url) == [url]

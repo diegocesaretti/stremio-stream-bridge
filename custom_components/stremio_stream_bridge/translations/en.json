@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Create an aggregate Stremio library",
-        "description": "Configure catalogs, default streams, subtitles and two optional profiles: Latin Audio and F1/Sports.",
+        "description": "Configure the PC server and providers. Latin Audio and Sports are preloaded; a temporary optional-provider outage will not block the integration.",
         "data": {
           "streaming_server_url": "stream-server URL",
           "catalog_manifest_urls": "Catalog and metadata manifests",
@@ -15,12 +15,12 @@
           "default_media_player": "Default media player"
         },
         "data_description": {
-          "streaming_server_url": "Example: http://192.168.1.50:11470",
-          "catalog_manifest_urls": "One URL per line. Cinemeta is suggested.",
-          "stream_manifest_urls": "One URL per line. Torrentio is suggested.",
-          "subtitle_manifest_urls": "OpenSubtitles v3 is suggested; leave empty to disable.",
-          "latin_manifest_urls": "Optional. Stream add-on focused on Latin Spanish audio. Plays without subtitles.",
-          "sports_manifest_urls": "Optional. Must declare catalogs and streams for F1/sports.",
+          "streaming_server_url": "Recommended server for this installation: {recommended_server_url}",
+          "catalog_manifest_urls": "One URL per line. Cinemeta is preloaded.",
+          "stream_manifest_urls": "One URL per line. Torrentio is preloaded.",
+          "subtitle_manifest_urls": "OpenSubtitles v3 is preloaded; leave empty to disable.",
+          "latin_manifest_urls": "Preloaded to prioritize Spanish/Latin audio. This profile plays without subtitles.",
+          "sports_manifest_urls": "StremVerse is preloaded for F1 and sports. Its outages do not block movies and series.",
           "default_media_player": "Chromecast, Android TV or another media_player entity"
         }
       }
@@ -31,6 +31,7 @@
       "init": {
         "title": "Providers and playback",
         "data": {
+          "streaming_server_url": "PC stream-server URL",
           "default_media_player": "Default media player",
           "catalog_manifest_urls": "Catalog and metadata manifests",
           "stream_manifest_urls": "Default stream manifests",
@@ -51,8 +52,8 @@
         "data_description": {
           "catalog_manifest_urls": "One URL per line.",
           "stream_manifest_urls": "Default providers for movies and series.",
-          "latin_manifest_urls": "Providers used only in Latin Audio; subtitles are disabled.",
-          "sports_manifest_urls": "Providers with their own event or channel catalogs.",
+          "latin_manifest_urls": "Preloaded with a Spanish/Latin provider. Used only by Latin Audio and plays without subtitles.",
+          "sports_manifest_urls": "StremVerse is preloaded for F1/sports. A temporary failure does not block the rest of the integration.",
           "subtitle_manifest_urls": "One URL per line. Leave empty to disable.",
           "play_ideal_on_select": "Enabled by default. Movies, episodes and events play directly without opening the source list.",
           "ideal_link_filter": "Prefers 1080p, most seeders and, on ties, the smallest file.",
@@ -61,9 +62,14 @@
           "subtitle_mode": "Automatic loads the first preferred language on Google Cast.",
           "subtitle_languages": "ISO codes in priority order, for example spa, eng.",
           "subtitle_convert_vtt": "Downloads, converts and serves WebVTT from Home Assistant.",
-          "subtitle_base_url": "LAN URL reachable by Chromecast, for example http://192.168.1.20:8123."
+          "subtitle_base_url": "Recommended LAN URL reachable by Chromecast: {recommended_subtitle_base_url}",
+          "streaming_server_url": "Recommended server for this installation: {recommended_server_url}"
         }
       }
     }
+  },
+  "error": {
+    "cannot_connect": "Could not connect to the main stream-server. Check its IP address and port 11470.",
+    "invalid_config": "The core configuration is invalid. Check the catalog and default stream URLs."
   }
 }

@@ -201,3 +201,31 @@ async def test_automatic_playback_skips_dead_proxied_playlist():
     assert stream is candidates[1]
     assert url.endswith("working.m3u8")
     assert mime == "application/vnd.apple.mpegurl"
+
+
+def test_v042_recommended_profile_defaults_are_populated():
+    assert CONST.DEFAULT_STREAMING_SERVER_URL == "http://192.168.1.145:11470"
+    assert "language=spanish,latino" in CONST.DEFAULT_LATIN_MANIFEST
+    assert CONST.DEFAULT_SPORTS_MANIFEST == (
+        "https://stremverse1.alwaysdata.net/manifest.json"
+    )
+
+
+@pytest.mark.asyncio
+async def test_optional_provider_failure_does_not_block_core_addons():
+    class FailingClient(FakeClient):
+        async def get_manifest(self):
+            raise API.StremioConnectionError("optional provider unavailable")
+
+    catalog = FakeClient("https://catalog/manifest.json", CATALOG)
+    default_stream = FakeClient("https://stream/manifest.json", LATIN)
+    optional_sports = FailingClient("https://sports/manifest.json", SPORTS)
+    manager = AGG.StremioAddonManager(
+        [catalog],
+        [default_stream],
+        sports_clients=[optional_sports],
+    )
+    addons = await manager.async_refresh()
+    assert len(addons) == 2
+    assert "https://sports/manifest.json" in manager.errors
+    assert manager.catalogs("movie", CONST.PROFILE_DEFAULT)

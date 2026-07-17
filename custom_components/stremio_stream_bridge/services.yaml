@@ -10,7 +10,7 @@ play:
           integration: stremio_stream_bridge
     media_type:
       name: Tipo
-      description: Tipo Stremio, por ejemplo movie o series.
+      description: Tipo Stremio, por ejemplo movie, series, tv, channel o sport.
       required: true
       selector:
         select:
@@ -18,6 +18,9 @@ play:
             - movie
             - series
             - anime
+            - tv
+            - channel
+            - sport
     media_id:
       name: ID de contenido
       description: ID IMDb o ID de episodio, por ejemplo tt0133093 o tt0903747:1:1.
@@ -31,6 +34,17 @@ play:
       selector:
         entity:
           domain: media_player
+    profile:
+      name: Perfil de proveedor
+      description: General, Audio Latino o F1/Deportes. Los perfiles especiales reproducen sin subtítulos.
+      required: false
+      default: default
+      selector:
+        select:
+          options:
+            - default
+            - latin
+            - sports
     stream_index:
       name: Índice de stream
       description: Opcional. Si se omite, usa el filtro de enlace ideal configurado.

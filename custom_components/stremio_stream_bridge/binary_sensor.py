@@ -12,7 +12,16 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import StremioBridgeRuntime
-from .const import CONF_DEFAULT_MEDIA_PLAYER, DOMAIN
+from .const import (
+    CONF_AUDIO_MODE,
+    CONF_DEFAULT_MEDIA_PLAYER,
+    CONF_PLAY_IDEAL_ON_SELECT,
+    DEFAULT_AUDIO_MODE,
+    DEFAULT_PLAY_IDEAL_ON_SELECT,
+    DOMAIN,
+    PROFILE_LATIN,
+    PROFILE_SPORTS,
+)
 from .subtitle_support import is_cast_player
 
 
@@ -59,6 +68,7 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
             CONF_DEFAULT_MEDIA_PLAYER,
             self._entry.data.get(CONF_DEFAULT_MEDIA_PLAYER),
         )
+        current = {**self._entry.data, **self._entry.options}
         return {
             "server_version": values.get("serverVersion") if isinstance(values, dict) else None,
             "addons": addons,
@@ -67,4 +77,11 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
             "subtitle_provider_errors": dict(self.coordinator.manager.last_subtitle_errors),
             "default_player": default_player,
             "external_subtitles_supported": is_cast_player(self.hass, default_player),
+            "subtitle_border": "none",
+            "audio_mode": current.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE),
+            "direct_ideal_on_select": current.get(
+                CONF_PLAY_IDEAL_ON_SELECT, DEFAULT_PLAY_IDEAL_ON_SELECT
+            ),
+            "latin_profile_available": self.coordinator.manager.has_profile(PROFILE_LATIN),
+            "sports_profile_available": self.coordinator.manager.has_profile(PROFILE_SPORTS),
         }

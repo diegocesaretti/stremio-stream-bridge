@@ -33,12 +33,17 @@ from .api import (
     parse_manifest_urls,
 )
 from .const import (
+    AUDIO_MODE_OPTIONS,
+    CONF_AUDIO_MODE,
     CONF_CATALOG_MANIFEST_URLS,
     CONF_DEFAULT_MEDIA_PLAYER,
     CONF_EXCLUDE_KEYWORDS,
     CONF_IDEAL_LINK_FILTER,
+    CONF_LATIN_MANIFEST_URLS,
     CONF_MAX_SIZE_GB,
+    CONF_PLAY_IDEAL_ON_SELECT,
     CONF_PREFERRED_QUALITY,
+    CONF_SPORTS_MANIFEST_URLS,
     CONF_STREAM_MANIFEST_URLS,
     CONF_STREAMING_SERVER_URL,
     CONF_SUBTITLE_BASE_URL,
@@ -46,11 +51,13 @@ from .const import (
     CONF_SUBTITLE_LANGUAGES,
     CONF_SUBTITLE_MANIFEST_URLS,
     CONF_SUBTITLE_MODE,
+    DEFAULT_AUDIO_MODE,
     DEFAULT_CINEMETA_MANIFEST,
     DEFAULT_EXCLUDE_KEYWORDS,
     DEFAULT_IDEAL_LINK_FILTER,
     DEFAULT_MAX_SIZE_GB,
     DEFAULT_OPENSUBTITLES_MANIFEST,
+    DEFAULT_PLAY_IDEAL_ON_SELECT,
     DEFAULT_PREFERRED_QUALITY,
     DEFAULT_SUBTITLE_BASE_URL,
     DEFAULT_SUBTITLE_CONVERT_VTT,
@@ -58,6 +65,8 @@ from .const import (
     DEFAULT_SUBTITLE_MODE,
     DEFAULT_TORRENTIO_MANIFEST,
     DOMAIN,
+    PROFILE_LATIN,
+    PROFILE_SPORTS,
     QUALITY_OPTIONS,
     SUBTITLE_MODE_OPTIONS,
 )
@@ -66,6 +75,10 @@ from .const import (
 def _as_lines(value: object, fallback: str = "") -> str:
     urls = parse_manifest_urls(value)
     return "\n".join(urls) if urls else fallback
+
+
+def _clients(session, urls: list[str]) -> list[StremioAddonClient]:
+    return [StremioAddonClient(session, url) for url in urls]
 
 
 def _connection_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -103,6 +116,14 @@ def _connection_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                     DEFAULT_OPENSUBTITLES_MANIFEST,
                 ),
             ): TextSelector(TextSelectorConfig(multiline=True)),
+            vol.Optional(
+                CONF_LATIN_MANIFEST_URLS,
+                default=_as_lines(defaults.get(CONF_LATIN_MANIFEST_URLS)),
+            ): TextSelector(TextSelectorConfig(multiline=True)),
+            vol.Optional(
+                CONF_SPORTS_MANIFEST_URLS,
+                default=_as_lines(defaults.get(CONF_SPORTS_MANIFEST_URLS)),
+            ): TextSelector(TextSelectorConfig(multiline=True)),
             player_key: EntitySelector(EntitySelectorConfig(domain="media_player")),
         }
     )
@@ -114,13 +135,17 @@ async def _validate(
     catalog_urls: list[str],
     stream_urls: list[str],
     subtitle_urls: list[str] | None = None,
+    latin_urls: list[str] | None = None,
+    sports_urls: list[str] | None = None,
 ) -> tuple[StremioAddonManager, dict[str, Any]]:
     session = async_get_clientsession(hass)
     server = StremioStreamServerClient(session, server_url)
     manager = StremioAddonManager(
-        [StremioAddonClient(session, url) for url in catalog_urls],
-        [StremioAddonClient(session, url) for url in stream_urls],
-        [StremioAddonClient(session, url) for url in subtitle_urls or []],
+        _clients(session, catalog_urls),
+        _clients(session, stream_urls),
+        _clients(session, subtitle_urls or []),
+        _clients(session, latin_urls or []),
+        _clients(session, sports_urls or []),
     )
     settings = await server.get_settings()
     await manager.async_refresh()
@@ -130,22 +155,37 @@ async def _validate(
         "stream" in addon.roles and manifest_has_resource(addon.manifest, "stream")
         for addon in manager.addons
     ):
-        raise StremioBridgeError("No stream provider was loaded")
+        raise StremioBridgeError("No default stream provider was loaded")
     if subtitle_urls and not any(
         "subtitle" in addon.roles
         and manifest_has_resource(addon.manifest, "subtitles")
         for addon in manager.addons
     ):
         raise StremioBridgeError("No subtitle provider was loaded")
+    if latin_urls and not any(
+        PROFILE_LATIN in addon.roles and manifest_has_resource(addon.manifest, "stream")
+        for addon in manager.addons
+    ):
+        raise StremioBridgeError("The Latin provider does not expose streams")
+    if sports_urls:
+        if not any(
+            PROFILE_SPORTS in addon.roles and manifest_has_resource(addon.manifest, "stream")
+            for addon in manager.addons
+        ):
+            raise StremioBridgeError("The sports provider does not expose streams")
+        if not manager.catalogs(profile=PROFILE_SPORTS):
+            raise StremioBridgeError("The sports provider does not expose a browsable catalog")
     return manager, settings
 
 
 class StremioStreamBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle configuration from the Home Assistant UI."""
 
-    VERSION = 3
+    VERSION = 4
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
@@ -155,14 +195,22 @@ class StremioStreamBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 subtitle_urls = parse_manifest_urls(
                     user_input.get(CONF_SUBTITLE_MANIFEST_URLS, "")
                 )
+                latin_urls = parse_manifest_urls(user_input.get(CONF_LATIN_MANIFEST_URLS, ""))
+                sports_urls = parse_manifest_urls(
+                    user_input.get(CONF_SPORTS_MANIFEST_URLS, "")
+                )
                 if not catalog_urls or not stream_urls:
-                    raise StremioBridgeError("At least one catalog and stream manifest is required")
+                    raise StremioBridgeError(
+                        "At least one catalog and stream manifest is required"
+                    )
                 await _validate(
                     self.hass,
                     server_url,
                     catalog_urls,
                     stream_urls,
                     subtitle_urls,
+                    latin_urls,
+                    sports_urls,
                 )
             except StremioBridgeError:
                 errors["base"] = "cannot_connect"
@@ -175,6 +223,8 @@ class StremioStreamBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_CATALOG_MANIFEST_URLS: catalog_urls,
                     CONF_STREAM_MANIFEST_URLS: stream_urls,
                     CONF_SUBTITLE_MANIFEST_URLS: subtitle_urls,
+                    CONF_LATIN_MANIFEST_URLS: latin_urls,
+                    CONF_SPORTS_MANIFEST_URLS: sports_urls,
                     CONF_DEFAULT_MEDIA_PLAYER: user_input[CONF_DEFAULT_MEDIA_PLAYER],
                 }
                 return self.async_create_entry(title="Stremio Media", data=data)
@@ -195,7 +245,9 @@ class StremioStreamBridgeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class StremioStreamBridgeOptionsFlow(config_entries.OptionsFlowWithReload):
     """Change providers and playback preferences, then reload automatically."""
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
@@ -203,6 +255,10 @@ class StremioStreamBridgeOptionsFlow(config_entries.OptionsFlowWithReload):
                 stream_urls = parse_manifest_urls(user_input[CONF_STREAM_MANIFEST_URLS])
                 subtitle_urls = parse_manifest_urls(
                     user_input.get(CONF_SUBTITLE_MANIFEST_URLS, "")
+                )
+                latin_urls = parse_manifest_urls(user_input.get(CONF_LATIN_MANIFEST_URLS, ""))
+                sports_urls = parse_manifest_urls(
+                    user_input.get(CONF_SPORTS_MANIFEST_URLS, "")
                 )
                 if not catalog_urls or not stream_urls:
                     raise StremioBridgeError("Manifest lists cannot be empty")
@@ -212,6 +268,8 @@ class StremioStreamBridgeOptionsFlow(config_entries.OptionsFlowWithReload):
                     catalog_urls,
                     stream_urls,
                     subtitle_urls,
+                    latin_urls,
+                    sports_urls,
                 )
             except StremioBridgeError:
                 errors["base"] = "cannot_connect"
@@ -222,6 +280,8 @@ class StremioStreamBridgeOptionsFlow(config_entries.OptionsFlowWithReload):
                         CONF_CATALOG_MANIFEST_URLS: catalog_urls,
                         CONF_STREAM_MANIFEST_URLS: stream_urls,
                         CONF_SUBTITLE_MANIFEST_URLS: subtitle_urls,
+                        CONF_LATIN_MANIFEST_URLS: latin_urls,
+                        CONF_SPORTS_MANIFEST_URLS: sports_urls,
                     }
                 )
 
@@ -245,6 +305,14 @@ class StremioStreamBridgeOptionsFlow(config_entries.OptionsFlowWithReload):
                     ),
                 ): TextSelector(TextSelectorConfig(multiline=True)),
                 vol.Optional(
+                    CONF_LATIN_MANIFEST_URLS,
+                    default=_as_lines(current.get(CONF_LATIN_MANIFEST_URLS)),
+                ): TextSelector(TextSelectorConfig(multiline=True)),
+                vol.Optional(
+                    CONF_SPORTS_MANIFEST_URLS,
+                    default=_as_lines(current.get(CONF_SPORTS_MANIFEST_URLS)),
+                ): TextSelector(TextSelectorConfig(multiline=True)),
+                vol.Optional(
                     CONF_SUBTITLE_MANIFEST_URLS,
                     default=_as_lines(
                         current.get(CONF_SUBTITLE_MANIFEST_URLS),
@@ -252,11 +320,21 @@ class StremioStreamBridgeOptionsFlow(config_entries.OptionsFlowWithReload):
                     ),
                 ): TextSelector(TextSelectorConfig(multiline=True)),
                 vol.Required(
+                    CONF_PLAY_IDEAL_ON_SELECT,
+                    default=current.get(
+                        CONF_PLAY_IDEAL_ON_SELECT, DEFAULT_PLAY_IDEAL_ON_SELECT
+                    ),
+                ): BooleanSelector(),
+                vol.Required(
                     CONF_IDEAL_LINK_FILTER,
                     default=current.get(
                         CONF_IDEAL_LINK_FILTER, DEFAULT_IDEAL_LINK_FILTER
                     ),
                 ): BooleanSelector(),
+                vol.Required(
+                    CONF_AUDIO_MODE,
+                    default=current.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE),
+                ): SelectSelector(SelectSelectorConfig(options=AUDIO_MODE_OPTIONS)),
                 vol.Required(
                     CONF_PREFERRED_QUALITY,
                     default=current.get(CONF_PREFERRED_QUALITY, DEFAULT_PREFERRED_QUALITY),

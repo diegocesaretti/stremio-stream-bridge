@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from .api import StremioAddonClient, StremioBridgeError, StremioProtocolError
+from .const import PROFILE_DEFAULT, PROFILE_LATIN, PROFILE_SPORTS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ class StremioAddonManager:
         catalog_clients: list[StremioAddonClient],
         stream_clients: list[StremioAddonClient],
         subtitle_clients: list[StremioAddonClient] | None = None,
+        latin_clients: list[StremioAddonClient] | None = None,
+        sports_clients: list[StremioAddonClient] | None = None,
     ) -> None:
         roles_by_url: dict[str, set[str]] = {}
         clients_by_url: dict[str, StremioAddonClient] = {}
@@ -44,6 +47,8 @@ class StremioAddonManager:
             ("catalog", catalog_clients),
             ("stream", stream_clients),
             ("subtitle", subtitle_clients or []),
+            (PROFILE_LATIN, latin_clients or []),
+            (PROFILE_SPORTS, sports_clients or []),
         ):
             for client in clients:
                 clients_by_url[client.manifest_url] = client
@@ -80,12 +85,33 @@ class StremioAddonManager:
         self.errors = errors
         return addons
 
-    def catalogs(self, media_type: str | None = None) -> list[tuple[LoadedAddon, dict[str, Any]]]:
-        """Return all catalog declarations from catalog-role add-ons."""
+    def has_profile(self, profile: str) -> bool:
+        """Return whether at least one loaded add-on belongs to a special profile."""
+        if profile == PROFILE_DEFAULT:
+            return True
+        return any(profile in addon.roles for addon in self.addons)
+
+    def catalogs(
+        self,
+        media_type: str | None = None,
+        profile: str = PROFILE_DEFAULT,
+    ) -> list[tuple[LoadedAddon, dict[str, Any]]]:
+        """Return catalog declarations for one playback profile."""
+        role = "catalog" if profile == PROFILE_DEFAULT else profile
+        result = self._catalogs_for_role(role, media_type)
+        # Most language-specific stream add-ons do not expose their own catalog.
+        # Mirror the regular Cinemeta catalog while retaining the Latin stream profile.
+        if profile == PROFILE_LATIN and not result:
+            result = self._catalogs_for_role("catalog", media_type)
+        return result
+
+    def _catalogs_for_role(
+        self, role: str, media_type: str | None
+    ) -> list[tuple[LoadedAddon, dict[str, Any]]]:
         result: list[tuple[LoadedAddon, dict[str, Any]]] = []
         seen: set[tuple[str, str, str]] = set()
         for addon in self.addons:
-            if "catalog" not in addon.roles:
+            if role not in addon.roles:
                 continue
             catalogs = addon.manifest.get("catalogs", [])
             if not isinstance(catalogs, list):
@@ -124,13 +150,24 @@ class StremioAddonManager:
         addon = self.get_addon(manifest_url)
         return await addon.client.get_catalog(media_type, catalog_id, extra)
 
-    async def get_meta(self, media_type: str, media_id: str) -> dict[str, Any]:
+    async def get_meta(
+        self,
+        media_type: str,
+        media_id: str,
+        profile: str = PROFILE_DEFAULT,
+    ) -> dict[str, Any]:
         """Return metadata from the first compatible provider that succeeds."""
+        preferred_role = "catalog" if profile == PROFILE_DEFAULT else profile
+        providers = [addon for addon in self.addons if preferred_role in addon.roles]
+        if profile != PROFILE_DEFAULT:
+            providers.extend(
+                addon
+                for addon in self.addons
+                if "catalog" in addon.roles and addon not in providers
+            )
         errors: list[str] = []
-        for addon in self.addons:
-            if "catalog" not in addon.roles or not supports_resource(
-                addon.manifest, "meta", media_type, media_id
-            ):
+        for addon in providers:
+            if not supports_resource(addon.manifest, "meta", media_type, media_id):
                 continue
             try:
                 return await addon.client.get_meta(media_type, media_id)
@@ -139,16 +176,22 @@ class StremioAddonManager:
         detail = "; ".join(errors) or "No compatible metadata provider"
         raise StremioProtocolError(detail)
 
-    async def get_streams(self, media_type: str, media_id: str) -> list[dict[str, Any]]:
-        """Fetch and merge streams from every compatible stream provider."""
+    async def get_streams(
+        self,
+        media_type: str,
+        media_id: str,
+        profile: str = PROFILE_DEFAULT,
+    ) -> list[dict[str, Any]]:
+        """Fetch and merge streams from compatible providers in one profile."""
+        role = "stream" if profile == PROFILE_DEFAULT else profile
         providers = [
             addon
             for addon in self.addons
-            if "stream" in addon.roles
+            if role in addon.roles
             and supports_resource(addon.manifest, "stream", media_type, media_id)
         ]
         if not providers:
-            raise StremioProtocolError("No compatible stream provider")
+            raise StremioProtocolError(f"No compatible {profile} stream provider")
         results = await asyncio.gather(
             *(addon.client.get_streams(media_type, media_id) for addon in providers),
             return_exceptions=True,
@@ -165,6 +208,7 @@ class StremioAddonManager:
                 enriched["_bridge_addon_name"] = addon.name
                 enriched["_bridge_addon_url"] = addon.client.manifest_url
                 enriched["_bridge_provider_index"] = provider_index
+                enriched["_bridge_profile"] = profile
                 key = stream_key(enriched)
                 if key in seen:
                     continue
@@ -226,10 +270,10 @@ class StremioAddonManager:
     async def search(
         self, query: str, media_types: tuple[str, ...] = ("movie", "series")
     ) -> list[dict[str, Any]]:
-        """Search catalogs that advertise the Stremio `search` extra."""
+        """Search default catalogs that advertise the Stremio `search` extra."""
         requests: list[tuple[LoadedAddon, dict[str, Any]]] = []
         for media_type in media_types:
-            for addon, catalog in self.catalogs(media_type):
+            for addon, catalog in self.catalogs(media_type, PROFILE_DEFAULT):
                 if catalog_supports_extra(catalog, "search"):
                     requests.append((addon, catalog))
                     break

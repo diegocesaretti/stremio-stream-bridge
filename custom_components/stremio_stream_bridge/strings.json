@@ -4,43 +4,45 @@
     "step": {
       "user": {
         "title": "Create an aggregate Stremio library",
-        "description": "Cinemeta can provide catalogs and metadata, Torrentio or other add-ons provide streams, and the PC stream-server serves video to the selected player.",
+        "description": "Configure catalogs, default streams, subtitles and two optional profiles: Latin Audio and F1/Sports.",
         "data": {
           "streaming_server_url": "stream-server URL",
           "catalog_manifest_urls": "Catalog and metadata manifests",
-          "stream_manifest_urls": "Stream manifests",
-          "default_media_player": "Default media player",
-          "subtitle_manifest_urls": "Subtitle manifests"
+          "stream_manifest_urls": "Default stream manifests",
+          "subtitle_manifest_urls": "Subtitle manifests",
+          "latin_manifest_urls": "Latin Audio manifests",
+          "sports_manifest_urls": "F1 and Sports manifests",
+          "default_media_player": "Default media player"
         },
         "data_description": {
           "streaming_server_url": "Example: http://192.168.1.50:11470",
-          "catalog_manifest_urls": "One URL per line. Cinemeta is suggested by default.",
-          "stream_manifest_urls": "One URL per line. Torrentio is suggested by default.",
-          "default_media_player": "Chromecast, Android TV or another media_player entity",
-          "subtitle_manifest_urls": "One URL per line. OpenSubtitles v3 is suggested by default; leave empty to disable."
+          "catalog_manifest_urls": "One URL per line. Cinemeta is suggested.",
+          "stream_manifest_urls": "One URL per line. Torrentio is suggested.",
+          "subtitle_manifest_urls": "OpenSubtitles v3 is suggested; leave empty to disable.",
+          "latin_manifest_urls": "Optional. Stream add-on focused on Latin Spanish audio. Plays without subtitles.",
+          "sports_manifest_urls": "Optional. Must declare catalogs and streams for F1/sports.",
+          "default_media_player": "Chromecast, Android TV or another media_player entity"
         }
       }
-    },
-    "error": {
-      "cannot_connect": "Could not validate stream-server or one of the manifests. Check URLs, network, ports and firewall rules."
-    },
-    "abort": {
-      "already_configured": "A library already exists for this stream-server."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Providers, ideal link and subtitles",
+        "title": "Providers and playback",
         "data": {
           "default_media_player": "Default media player",
           "catalog_manifest_urls": "Catalog and metadata manifests",
-          "stream_manifest_urls": "Stream manifests",
+          "stream_manifest_urls": "Default stream manifests",
+          "latin_manifest_urls": "Latin Audio manifests",
+          "sports_manifest_urls": "F1 and Sports manifests",
+          "subtitle_manifest_urls": "Subtitle manifests",
+          "play_ideal_on_select": "Play ideal link when selecting an item",
+          "ideal_link_filter": "Enable ideal-link filter",
+          "audio_mode": "Audio compatibility",
           "preferred_quality": "Preferred quality",
           "max_size_gb": "Maximum size in GB (0 = unlimited)",
           "exclude_keywords": "Excluded keywords",
-          "subtitle_manifest_urls": "Subtitle manifests",
-          "ideal_link_filter": "Enable ideal-link filter",
           "subtitle_mode": "Subtitle mode",
           "subtitle_languages": "Preferred subtitle languages",
           "subtitle_convert_vtt": "Convert subtitles to WebVTT",
@@ -48,19 +50,20 @@
         },
         "data_description": {
           "catalog_manifest_urls": "One URL per line.",
-          "stream_manifest_urls": "One URL per line.",
+          "stream_manifest_urls": "Default providers for movies and series.",
+          "latin_manifest_urls": "Providers used only in Latin Audio; subtitles are disabled.",
+          "sports_manifest_urls": "Providers with their own event or channel catalogs.",
+          "subtitle_manifest_urls": "One URL per line. Leave empty to disable.",
+          "play_ideal_on_select": "Enabled by default. Movies, episodes and events play directly without opening the source list.",
+          "ideal_link_filter": "Prefers 1080p, most seeders and, on ties, the smallest file.",
+          "audio_mode": "Automatic wraps problematic torrents as H.264/AAC HLS. Direct performs no conversion. Force always transcodes.",
           "exclude_keywords": "Comma separated, for example CAM, TS, HDCAM.",
-          "subtitle_manifest_urls": "One URL per line. Leave empty to disable subtitle providers.",
-          "ideal_link_filter": "When enabled, automatic playback prefers 1080p, then the highest seeder count, then the smallest file. It overrides Preferred quality.",
-          "subtitle_mode": "Automatic loads the first subtitle matching the preferred language list on Google Cast targets.",
-          "subtitle_languages": "Comma separated ISO codes in priority order, for example spa, eng.",
-          "subtitle_convert_vtt": "Downloads and converts subtitles in Home Assistant, then serves a temporary WebVTT URL with CORS. Falls back to stream-server conversion if necessary.",
-          "subtitle_base_url": "Optional. Use the LAN URL reachable by the player, for example http://192.168.1.20:8123. Leave empty for automatic detection."
+          "subtitle_mode": "Automatic loads the first preferred language on Google Cast.",
+          "subtitle_languages": "ISO codes in priority order, for example spa, eng.",
+          "subtitle_convert_vtt": "Downloads, converts and serves WebVTT from Home Assistant.",
+          "subtitle_base_url": "LAN URL reachable by Chromecast, for example http://192.168.1.20:8123."
         }
       }
-    },
-    "error": {
-      "cannot_connect": "Providers could not be validated. Changes were not saved."
     }
   }
 }

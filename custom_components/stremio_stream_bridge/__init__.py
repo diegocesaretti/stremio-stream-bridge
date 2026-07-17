@@ -23,12 +23,14 @@ from .api import (
     guess_mime_type,
     parse_manifest_urls,
 )
+from .cast_style import install_no_edge_subtitle_patch
 from .const import (
     ATTR_DISABLE_SUBTITLES,
     ATTR_ENTRY_ID,
     ATTR_MEDIA_ID,
     ATTR_MEDIA_PLAYER,
     ATTR_MEDIA_TYPE,
+    ATTR_PROFILE,
     ATTR_QUERY,
     ATTR_STREAM_INDEX,
     ATTR_URL,
@@ -38,8 +40,10 @@ from .const import (
     CONF_DEFAULT_STREAM_INDEX,
     CONF_EXCLUDE_KEYWORDS,
     CONF_IDEAL_LINK_FILTER,
+    CONF_LATIN_MANIFEST_URLS,
     CONF_MAX_SIZE_GB,
     CONF_PREFERRED_QUALITY,
+    CONF_SPORTS_MANIFEST_URLS,
     CONF_STREAM_MANIFEST_URLS,
     CONF_STREAMING_SERVER_URL,
     CONF_SUBTITLE_BASE_URL,
@@ -52,12 +56,15 @@ from .const import (
     DEFAULT_MAX_SIZE_GB,
     DEFAULT_OPENSUBTITLES_MANIFEST,
     DEFAULT_PREFERRED_QUALITY,
-    DEFAULT_SUBTITLE_BASE_URL,
     DEFAULT_SUBTITLE_CONVERT_VTT,
     DEFAULT_SUBTITLE_LANGUAGES,
     DEFAULT_TORRENTIO_MANIFEST,
     DOMAIN,
     PLATFORMS,
+    PROFILE_DEFAULT,
+    PROFILE_LATIN,
+    PROFILE_OPTIONS,
+    PROFILE_SPORTS,
     SERVICE_PLAY,
     SERVICE_PLAY_URL,
     SERVICE_REFRESH,
@@ -65,6 +72,7 @@ from .const import (
     SERVICE_SUBTITLE_DIAGNOSTICS,
 )
 from .coordinator import StremioBridgeCoordinator
+from .playback import prepare_playback
 from .stream_selector import choose_best_stream, choose_ideal_stream
 from .subtitle_proxy import SubtitleProxy, SubtitleProxyError, SubtitleProxyView
 from .subtitle_support import (
@@ -97,6 +105,7 @@ PLAY_SCHEMA = vol.Schema(
         vol.Optional(ATTR_MEDIA_PLAYER): cv.entity_id,
         vol.Optional(ATTR_STREAM_INDEX): vol.All(vol.Coerce(int), vol.Range(min=0)),
         vol.Optional(ATTR_DISABLE_SUBTITLES, default=False): cv.boolean,
+        vol.Optional(ATTR_PROFILE, default=PROFILE_DEFAULT): vol.In(PROFILE_OPTIONS),
     }
 )
 
@@ -130,7 +139,8 @@ SUBTITLE_DIAGNOSTICS_SCHEMA = vol.Schema(
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    """Register integration services and the ephemeral subtitle endpoint."""
+    """Register services, subtitle endpoint and Cast subtitle styling."""
+    install_no_edge_subtitle_patch()
     domain_data = hass.data.setdefault(DOMAIN, {})
     if "subtitle_proxy" not in domain_data:
         subtitle_proxy = SubtitleProxy(hass, async_get_clientsession(hass))
@@ -142,19 +152,34 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         runtime: StremioBridgeRuntime = entry.runtime_data
         media_type = call.data[ATTR_MEDIA_TYPE]
         media_id = call.data[ATTR_MEDIA_ID]
-        streams = await runtime.manager.get_streams(media_type, media_id)
+        profile = str(call.data.get(ATTR_PROFILE, PROFILE_DEFAULT))
+        streams = await runtime.manager.get_streams(media_type, media_id, profile)
         if not streams:
             raise HomeAssistantError("No stream provider returned a playable source")
+        current = {**entry.data, **entry.options}
         try:
-            stream = _select_stream(entry, streams, call.data.get(ATTR_STREAM_INDEX))
-            url = runtime.server.resolve_stream(stream)
+            stream = _select_stream(
+                entry,
+                streams,
+                call.data.get(ATTR_STREAM_INDEX),
+                profile=profile,
+            )
+            url, mime_type = prepare_playback(
+                runtime.server,
+                stream,
+                current,
+                profile=profile,
+            )
         except (StremioBridgeError, ValueError) as err:
             raise HomeAssistantError(str(err)) from err
         player = _resolve_player(entry, call.data.get(ATTR_MEDIA_PLAYER))
-        current = {**entry.data, **entry.options}
         subtitle = None
         cast_target = is_cast_player(hass, player)
-        if cast_target:
+        subtitles_disabled = bool(call.data.get(ATTR_DISABLE_SUBTITLES)) or profile in {
+            PROFILE_LATIN,
+            PROFILE_SPORTS,
+        }
+        if cast_target and not subtitles_disabled:
             subtitle = await async_prepare_subtitle_track(
                 runtime.manager,
                 runtime.server,
@@ -163,9 +188,8 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
                 media_type,
                 media_id,
                 stream,
-                disabled=bool(call.data.get(ATTR_DISABLE_SUBTITLES)),
             )
-        elif not bool(call.data.get(ATTR_DISABLE_SUBTITLES)):
+        elif not subtitles_disabled and not cast_target:
             _LOGGER.warning(
                 "External subtitles were skipped because %s is not a Home Assistant "
                 "Cast entity",
@@ -174,7 +198,11 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         title = media_id
         thumbnail = None
         try:
-            meta = await runtime.manager.get_meta(media_type, media_id.split(":", 1)[0])
+            meta = await runtime.manager.get_meta(
+                media_type,
+                media_id.split(":", 1)[0],
+                profile,
+            )
             title = str(meta.get("name") or meta.get("title") or media_id)
             thumbnail = meta.get("poster") or meta.get("background")
         except StremioBridgeError:
@@ -184,7 +212,14 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             if cast_target
             else None
         )
-        await _async_play_url(hass, call, player, url, extra=extra)
+        await _async_play_url(
+            hass,
+            call,
+            player,
+            url,
+            mime_type=mime_type,
+            extra=extra,
+        )
 
     async def handle_play_url(call: ServiceCall) -> None:
         entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
@@ -192,7 +227,9 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         raw_url = call.data[ATTR_URL].strip()
         try:
             url = (
-                runtime.server.resolve_magnet(raw_url) if raw_url.startswith("magnet:") else raw_url
+                runtime.server.resolve_magnet(raw_url)
+                if raw_url.startswith("magnet:")
+                else raw_url
             )
         except StremioBridgeError as err:
             raise HomeAssistantError(str(err)) from err
@@ -223,14 +260,17 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         runtime: StremioBridgeRuntime = entry.runtime_data
         media_type = call.data[ATTR_MEDIA_TYPE]
         media_id = call.data[ATTR_MEDIA_ID]
-        streams = await runtime.manager.get_streams(media_type, media_id)
+        streams = await runtime.manager.get_streams(media_type, media_id, PROFILE_DEFAULT)
         if not streams:
             return {"ok": False, "error": "No stream provider returned a source"}
-        stream = _select_stream(entry, streams, call.data.get(ATTR_STREAM_INDEX))
-        current = {**entry.data, **entry.options}
-        subtitles = await runtime.manager.get_subtitles(
-            media_type, media_id, None, stream
+        stream = _select_stream(
+            entry,
+            streams,
+            call.data.get(ATTR_STREAM_INDEX),
+            profile=PROFILE_DEFAULT,
         )
+        current = {**entry.data, **entry.options}
+        subtitles = await runtime.manager.get_subtitles(media_type, media_id, None, stream)
         selected = choose_subtitle(
             subtitles,
             current.get(CONF_SUBTITLE_LANGUAGES, DEFAULT_SUBTITLE_LANGUAGES),
@@ -242,6 +282,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             "media_id": media_id,
             "player": player,
             "cast_entity": is_cast_player(hass, player),
+            "subtitle_border": "none",
             "subtitle_count": len(subtitles),
             "available_languages": sorted(
                 {str(item.get("lang") or "und") for item in subtitles}
@@ -266,10 +307,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             try:
                 response["delivery_url"] = await runtime.subtitle_proxy.async_prepare_url(
                     raw_url,
-                    str(
-                        current.get(CONF_SUBTITLE_BASE_URL, DEFAULT_SUBTITLE_BASE_URL)
-                        or ""
-                    ),
+                    str(current.get(CONF_SUBTITLE_BASE_URL, "") or ""),
                 )
                 response["delivery_method"] = "home_assistant_webvtt_proxy"
             except SubtitleProxyError as err:
@@ -295,7 +333,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate older single-add-on entries to the aggregate v0.3 format."""
+    """Migrate older entries to the multi-profile v0.4 format."""
     data = dict(entry.data)
     version = entry.version
     if version < 2:
@@ -310,13 +348,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         version = 2
     if version < 3:
         data.setdefault(
-            CONF_SUBTITLE_BASE_URL,
-    CONF_SUBTITLE_CONVERT_VTT,
-    CONF_SUBTITLE_LANGUAGES,
-    CONF_SUBTITLE_MANIFEST_URLS,
+            CONF_SUBTITLE_MANIFEST_URLS,
             parse_manifest_urls([DEFAULT_OPENSUBTITLES_MANIFEST]),
         )
         version = 3
+    if version < 4:
+        data.setdefault(CONF_LATIN_MANIFEST_URLS, [])
+        data.setdefault(CONF_SPORTS_MANIFEST_URLS, [])
+        version = 4
     hass.config_entries.async_update_entry(entry, data=data, version=version)
     return True
 
@@ -334,10 +373,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     subtitle_urls = parse_manifest_urls(
         current.get(CONF_SUBTITLE_MANIFEST_URLS, [DEFAULT_OPENSUBTITLES_MANIFEST])
     )
+    latin_urls = parse_manifest_urls(current.get(CONF_LATIN_MANIFEST_URLS, []))
+    sports_urls = parse_manifest_urls(current.get(CONF_SPORTS_MANIFEST_URLS, []))
     manager = StremioAddonManager(
         [StremioAddonClient(session, url) for url in catalog_urls],
         [StremioAddonClient(session, url) for url in stream_urls],
         [StremioAddonClient(session, url) for url in subtitle_urls],
+        [StremioAddonClient(session, url) for url in latin_urls],
+        [StremioAddonClient(session, url) for url in sports_urls],
     )
     server = StremioStreamServerClient(session, entry.data[CONF_STREAMING_SERVER_URL])
     coordinator = StremioBridgeCoordinator(hass, manager, server)
@@ -360,6 +403,8 @@ def _select_stream(
     entry: ConfigEntry,
     streams: list[dict[str, Any]],
     requested_index: int | None,
+    *,
+    profile: str,
 ) -> dict[str, Any]:
     if requested_index is not None:
         if requested_index >= len(streams):
@@ -372,13 +417,16 @@ def _select_stream(
         legacy_index = int(entry.options[CONF_DEFAULT_STREAM_INDEX])
         if legacy_index < len(streams):
             return streams[legacy_index]
-    max_size = float(entry.options.get(CONF_MAX_SIZE_GB, DEFAULT_MAX_SIZE_GB))
-    excluded = str(entry.options.get(CONF_EXCLUDE_KEYWORDS, DEFAULT_EXCLUDE_KEYWORDS))
-    if bool(entry.options.get(CONF_IDEAL_LINK_FILTER, DEFAULT_IDEAL_LINK_FILTER)):
+    if profile == PROFILE_SPORTS:
+        return streams[0]
+    current = {**entry.data, **entry.options}
+    max_size = float(current.get(CONF_MAX_SIZE_GB, DEFAULT_MAX_SIZE_GB))
+    excluded = str(current.get(CONF_EXCLUDE_KEYWORDS, DEFAULT_EXCLUDE_KEYWORDS))
+    if bool(current.get(CONF_IDEAL_LINK_FILTER, DEFAULT_IDEAL_LINK_FILTER)):
         return choose_ideal_stream(streams, max_size, excluded)
     return choose_best_stream(
         streams,
-        str(entry.options.get(CONF_PREFERRED_QUALITY, DEFAULT_PREFERRED_QUALITY)),
+        str(current.get(CONF_PREFERRED_QUALITY, DEFAULT_PREFERRED_QUALITY)),
         max_size,
         excluded,
     )
@@ -403,7 +451,9 @@ def _resolve_entry(hass: HomeAssistant, entry_id: str | None) -> ConfigEntry:
     if entry_id:
         entry = hass.config_entries.async_get_entry(entry_id)
         if entry is None or entry not in entries:
-            raise HomeAssistantError(f"Stremio Stream Bridge entry {entry_id} is not loaded")
+            raise HomeAssistantError(
+                f"Stremio Stream Bridge entry {entry_id} is not loaded"
+            )
         return entry
     if len(entries) == 1:
         return entries[0]
@@ -428,12 +478,13 @@ async def _async_play_url(
     player: str,
     url: str,
     *,
+    mime_type: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
     data: dict[str, Any] = {
         ATTR_ENTITY_ID: player,
         "media_content_id": url,
-        "media_content_type": guess_mime_type(url),
+        "media_content_type": mime_type or guess_mime_type(url),
     }
     if extra:
         data["extra"] = extra

@@ -7,6 +7,7 @@ import binascii
 from collections.abc import Mapping
 import logging
 import mimetypes
+import secrets
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 
@@ -219,6 +220,27 @@ class StremioStreamServerClient:
             raise StremioProtocolError("Subtitle URL must use HTTP(S)")
         return f"{self.base_url}subtitles.vtt?{urlencode({'from': subtitle_url})}"
 
+    def build_compatible_hls_url(
+        self,
+        media_url: str,
+        *,
+        force_transcoding: bool = False,
+        max_audio_channels: int = 2,
+    ) -> str:
+        """Build Stremio hlsv2 URL targeting H.264 video and AAC audio."""
+        if not media_url.startswith(("http://", "https://")):
+            raise StremioProtocolError("HLS source URL must use HTTP(S)")
+        params: list[tuple[str, str]] = [
+            ("mediaURL", media_url),
+            ("videoCodecs", "h264"),
+            ("audioCodecs", "aac"),
+            ("maxAudioChannels", str(max(1, int(max_audio_channels)))),
+        ]
+        if force_transcoding:
+            params.append(("forceTranscoding", "1"))
+        session_id = secrets.token_hex(12)
+        return f"{self.base_url}hlsv2/{session_id}/master.m3u8?{urlencode(params)}"
+
     def build_torrent_url(
         self,
         info_hash: str,
@@ -311,6 +333,18 @@ def guess_mime_type(url: str) -> str:
         return "application/dash+xml"
     mime_type, _ = mimetypes.guess_type(lowered)
     return mime_type or "video/mp4"
+
+
+def guess_stream_mime_type(stream: Mapping[str, Any], resolved_url: str) -> str:
+    """Prefer the add-on filename when the resolved stream URL has no extension."""
+    hints = stream.get("behaviorHints")
+    if isinstance(hints, Mapping):
+        filename = hints.get("filename")
+        if isinstance(filename, str) and filename:
+            mime_type, _ = mimetypes.guess_type(filename.lower())
+            if mime_type:
+                return mime_type
+    return guess_mime_type(resolved_url)
 
 
 def parse_manifest_urls(value: object) -> list[str]:

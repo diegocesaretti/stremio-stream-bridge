@@ -29,19 +29,25 @@ from .aggregator import (
     catalog_supports_extra,
     stream_key,
 )
-from .api import StremioBridgeError, StremioProtocolError, guess_mime_type
+from .api import StremioBridgeError, StremioProtocolError
 from .const import (
     CONF_EXCLUDE_KEYWORDS,
     CONF_IDEAL_LINK_FILTER,
     CONF_MAX_SIZE_GB,
+    CONF_PLAY_IDEAL_ON_SELECT,
     CONF_PREFERRED_QUALITY,
     DEFAULT_EXCLUDE_KEYWORDS,
     DEFAULT_IDEAL_LINK_FILTER,
     DEFAULT_MAX_SIZE_GB,
+    DEFAULT_PLAY_IDEAL_ON_SELECT,
     DEFAULT_PREFERRED_QUALITY,
     DOMAIN,
     NAME,
+    PROFILE_DEFAULT,
+    PROFILE_LATIN,
+    PROFILE_SPORTS,
 )
+from .playback import prepare_playback
 from .stream_selector import choose_best_stream, choose_ideal_stream, stream_label
 from .subtitle_support import (
     async_prepare_subtitle_track,
@@ -76,6 +82,8 @@ class StremioBridgeMediaSource(MediaSource):
             kind = payload.get("kind")
             if kind == "entry":
                 return self._browse_entry(payload)
+            if kind == "profile":
+                return self._browse_profile(payload)
             if kind == "type":
                 return self._browse_type(payload)
             if kind == "catalog":
@@ -103,37 +111,44 @@ class StremioBridgeMediaSource(MediaSource):
                 raise Unresolvable("Selected item is not playable")
             entry = self._entry(payload["entry_id"])
             runtime: StremioBridgeRuntime = entry.runtime_data
-            streams = await runtime.manager.get_streams(payload["type"], payload["id"])
+            profile = str(payload.get("profile") or PROFILE_DEFAULT)
+            streams = await runtime.manager.get_streams(
+                payload["type"], payload["id"], profile
+            )
             if not streams:
                 raise Unresolvable("No stream provider returned a source")
             current = {**entry.data, **entry.options}
             if payload.get("selection") == "auto":
-                max_size = float(current.get(CONF_MAX_SIZE_GB, DEFAULT_MAX_SIZE_GB))
-                excluded = str(
-                    current.get(CONF_EXCLUDE_KEYWORDS, DEFAULT_EXCLUDE_KEYWORDS)
-                )
-                if bool(
-                    current.get(CONF_IDEAL_LINK_FILTER, DEFAULT_IDEAL_LINK_FILTER)
-                ):
-                    stream = choose_ideal_stream(streams, max_size, excluded)
+                if profile == PROFILE_SPORTS:
+                    stream = streams[0]
                 else:
-                    stream = choose_best_stream(
-                        streams,
-                        str(
-                            current.get(
-                                CONF_PREFERRED_QUALITY, DEFAULT_PREFERRED_QUALITY
-                            )
-                        ),
-                        max_size,
-                        excluded,
+                    max_size = float(current.get(CONF_MAX_SIZE_GB, DEFAULT_MAX_SIZE_GB))
+                    excluded = str(
+                        current.get(CONF_EXCLUDE_KEYWORDS, DEFAULT_EXCLUDE_KEYWORDS)
                     )
+                    if bool(
+                        current.get(CONF_IDEAL_LINK_FILTER, DEFAULT_IDEAL_LINK_FILTER)
+                    ):
+                        stream = choose_ideal_stream(streams, max_size, excluded)
+                    else:
+                        stream = choose_best_stream(
+                            streams,
+                            str(
+                                current.get(
+                                    CONF_PREFERRED_QUALITY, DEFAULT_PREFERRED_QUALITY
+                                )
+                            ),
+                            max_size,
+                            excluded,
+                        )
             else:
                 key = str(payload.get("stream_key") or "")
                 stream = find_stream_by_key(streams, key)
                 if stream is None:
                     raise Unresolvable("That stream is no longer available; reopen the list")
-            url = runtime.server.resolve_stream(stream)
-            mime_type = guess_mime_type(url)
+            url, mime_type = prepare_playback(
+                runtime.server, stream, current, profile=profile
+            )
             if is_cast_player(self.hass, item.target_media_player):
                 subtitle = await async_prepare_subtitle_track(
                     runtime.manager,
@@ -143,7 +158,10 @@ class StremioBridgeMediaSource(MediaSource):
                     payload["type"],
                     payload["id"],
                     stream,
-                    disabled=payload.get("subtitles") == "off",
+                    disabled=(
+                        payload.get("subtitles") == "off"
+                        or profile in {PROFILE_LATIN, PROFILE_SPORTS}
+                    ),
                 )
                 cast_payload = cast_media_source_payload(
                     url,
@@ -167,7 +185,10 @@ class StremioBridgeMediaSource(MediaSource):
         runtime: StremioBridgeRuntime = entry.runtime_data
         media_types = self._search_media_types(query)
         metas = await runtime.manager.search(str(query.search_query), media_types)
-        results = [self._meta_preview(entry.entry_id, meta) for meta in metas]
+        results = [
+            self._meta_preview(entry.entry_id, meta, profile=PROFILE_DEFAULT)
+            for meta in metas
+        ]
         return SearchMedia(result=results)
 
     def _root(self) -> BrowseMediaSource:
@@ -198,29 +219,55 @@ class StremioBridgeMediaSource(MediaSource):
     def _browse_entry(self, payload: dict[str, Any]) -> BrowseMediaSource:
         entry = self._entry(payload["entry_id"])
         runtime: StremioBridgeRuntime = entry.runtime_data
+        children: list[BrowseMediaSource] = []
         available_types = sorted(
             {
                 str(catalog.get("type"))
-                for _, catalog in runtime.manager.catalogs()
+                for _, catalog in runtime.manager.catalogs(profile=PROFILE_DEFAULT)
                 if catalog.get("type") in {"movie", "series"}
             },
             key=lambda value: (value != "movie", value),
         )
-        children = [
-            _node(
-                identifier=_encode(
-                    {"kind": "type", "entry_id": entry.entry_id, "type": media_type}
-                ),
-                media_class=MediaClass.DIRECTORY,
-                media_content_type=_media_type(media_type),
-                title="Películas" if media_type == "movie" else "Series",
-                can_play=False,
-                can_expand=True,
-                can_search=MEDIA_SOURCE_SEARCH_SUPPORTED,
-                children_media_class=MediaClass.DIRECTORY,
+        for media_type in available_types:
+            children.append(
+                self._type_node(entry.entry_id, media_type, PROFILE_DEFAULT)
             )
-            for media_type in available_types
-        ]
+        if runtime.manager.has_profile(PROFILE_LATIN):
+            children.append(
+                _node(
+                    identifier=_encode(
+                        {
+                            "kind": "profile",
+                            "entry_id": entry.entry_id,
+                            "profile": PROFILE_LATIN,
+                        }
+                    ),
+                    media_class=MediaClass.DIRECTORY,
+                    media_content_type=MediaType.VIDEO,
+                    title="Audio Latino",
+                    can_play=False,
+                    can_expand=True,
+                    children_media_class=MediaClass.DIRECTORY,
+                )
+            )
+        if runtime.manager.has_profile(PROFILE_SPORTS):
+            children.append(
+                _node(
+                    identifier=_encode(
+                        {
+                            "kind": "profile",
+                            "entry_id": entry.entry_id,
+                            "profile": PROFILE_SPORTS,
+                        }
+                    ),
+                    media_class=MediaClass.DIRECTORY,
+                    media_content_type=MediaType.CHANNEL,
+                    title="F1 y Deportes",
+                    can_play=False,
+                    can_expand=True,
+                    children_media_class=MediaClass.DIRECTORY,
+                )
+            )
         if runtime.last_search_query:
             children.insert(
                 0,
@@ -248,12 +295,51 @@ class StremioBridgeMediaSource(MediaSource):
             children=children,
         )
 
+    def _browse_profile(self, payload: dict[str, Any]) -> BrowseMediaSource:
+        entry = self._entry(payload["entry_id"])
+        runtime: StremioBridgeRuntime = entry.runtime_data
+        profile = str(payload["profile"])
+        available_types = sorted(
+            {str(catalog.get("type")) for _, catalog in runtime.manager.catalogs(profile=profile)}
+        )
+        children = [self._type_node(entry.entry_id, media_type, profile) for media_type in available_types]
+        title = "Audio Latino" if profile == PROFILE_LATIN else "F1 y Deportes"
+        return _node(
+            identifier=_encode(payload),
+            media_class=MediaClass.DIRECTORY,
+            media_content_type=MediaType.VIDEO,
+            title=title,
+            can_play=False,
+            can_expand=True,
+            children_media_class=MediaClass.DIRECTORY,
+            children=children,
+        )
+
+    def _type_node(self, entry_id: str, media_type: str, profile: str) -> BrowseMediaSource:
+        return _node(
+            identifier=_encode(
+                {
+                    "kind": "type",
+                    "entry_id": entry_id,
+                    "type": media_type,
+                    "profile": profile,
+                }
+            ),
+            media_class=MediaClass.DIRECTORY,
+            media_content_type=_media_type(media_type),
+            title=_type_title(media_type),
+            can_play=False,
+            can_expand=True,
+            can_search=MEDIA_SOURCE_SEARCH_SUPPORTED and profile == PROFILE_DEFAULT,
+            children_media_class=MediaClass.DIRECTORY,
+        )
     def _browse_type(self, payload: dict[str, Any]) -> BrowseMediaSource:
         entry = self._entry(payload["entry_id"])
         runtime: StremioBridgeRuntime = entry.runtime_data
         media_type = payload["type"]
+        profile = str(payload.get("profile") or PROFILE_DEFAULT)
         children: list[BrowseMediaSource] = []
-        for addon, catalog in runtime.manager.catalogs(media_type):
+        for addon, catalog in runtime.manager.catalogs(media_type, profile):
             children.append(
                 _node(
                     identifier=_encode(
@@ -261,6 +347,7 @@ class StremioBridgeMediaSource(MediaSource):
                             "kind": "catalog",
                             "entry_id": entry.entry_id,
                             "type": media_type,
+                            "profile": profile,
                             "catalog_id": catalog["id"],
                             "manifest_url": addon.client.manifest_url,
                             "name": catalog.get("name") or catalog["id"],
@@ -280,14 +367,13 @@ class StremioBridgeMediaSource(MediaSource):
             identifier=_encode(payload),
             media_class=MediaClass.DIRECTORY,
             media_content_type=_media_type(media_type),
-            title="Películas" if media_type == "movie" else "Series",
+            title=_type_title(media_type),
             can_play=False,
             can_expand=True,
-            can_search=MEDIA_SOURCE_SEARCH_SUPPORTED,
+            can_search=MEDIA_SOURCE_SEARCH_SUPPORTED and profile == PROFILE_DEFAULT,
             children_media_class=MediaClass.DIRECTORY,
             children=children,
         )
-
     async def _browse_catalog(self, payload: dict[str, Any]) -> BrowseMediaSource:
         entry = self._entry(payload["entry_id"])
         runtime: StremioBridgeRuntime = entry.runtime_data
@@ -328,7 +414,10 @@ class StremioBridgeMediaSource(MediaSource):
                     )
                 )
         children.extend(
-            self._meta_preview(entry.entry_id, meta, payload["type"]) for meta in metas
+            self._meta_preview(
+                entry.entry_id, meta, payload["type"], str(payload.get("profile") or PROFILE_DEFAULT)
+            )
+            for meta in metas
         )
         if metas and catalog_supports_extra(catalog, "skip"):
             next_extra = dict(extra)
@@ -427,8 +516,9 @@ class StremioBridgeMediaSource(MediaSource):
     async def _browse_meta(self, payload: dict[str, Any]) -> BrowseMediaSource:
         entry = self._entry(payload["entry_id"])
         runtime: StremioBridgeRuntime = entry.runtime_data
+        profile = str(payload.get("profile") or PROFILE_DEFAULT)
         try:
-            meta = await runtime.manager.get_meta(payload["type"], payload["id"])
+            meta = await runtime.manager.get_meta(payload["type"], payload["id"], profile)
         except StremioBridgeError:
             meta = {
                 "id": payload["id"],
@@ -438,9 +528,11 @@ class StremioBridgeMediaSource(MediaSource):
         if payload["type"] != "series":
             return await self._stream_choices_node(payload, meta)
 
-        videos = [
-            video for video in meta.get("videos", []) if isinstance(video, dict)
-        ] if isinstance(meta.get("videos"), list) else []
+        videos = (
+            [video for video in meta.get("videos", []) if isinstance(video, dict)]
+            if isinstance(meta.get("videos"), list)
+            else []
+        )
         seasons = sorted(
             {
                 int(video.get("season", 0) or 0)
@@ -457,6 +549,7 @@ class StremioBridgeMediaSource(MediaSource):
                         "kind": "season",
                         "entry_id": entry.entry_id,
                         "type": payload["type"],
+                        "profile": profile,
                         "id": payload["id"],
                         "season": season,
                         "name": meta.get("name") or payload["id"],
@@ -484,11 +577,11 @@ class StremioBridgeMediaSource(MediaSource):
             children_media_class=MediaClass.SEASON,
             children=children,
         )
-
     async def _browse_season(self, payload: dict[str, Any]) -> BrowseMediaSource:
         entry = self._entry(payload["entry_id"])
         runtime: StremioBridgeRuntime = entry.runtime_data
-        meta = await runtime.manager.get_meta(payload["type"], payload["id"])
+        profile = str(payload.get("profile") or PROFILE_DEFAULT)
+        meta = await runtime.manager.get_meta(payload["type"], payload["id"], profile)
         season = int(payload["season"])
         videos = sorted(
             (
@@ -498,6 +591,7 @@ class StremioBridgeMediaSource(MediaSource):
             ),
             key=lambda video: int(video.get("episode", 0) or 0),
         )
+        direct = self._direct_play_enabled(entry)
         children: list[BrowseMediaSource] = []
         for video in videos:
             video_id = video.get("id")
@@ -505,25 +599,34 @@ class StremioBridgeMediaSource(MediaSource):
                 continue
             episode = int(video.get("episode", 0) or 0)
             title = str(video.get("title") or video.get("name") or video_id)
+            poster = video.get("thumbnail") or meta.get("poster")
+            identifier = (
+                self._video_identifier(
+                    entry.entry_id, payload["type"], video_id, title, poster, profile
+                )
+                if direct
+                else _encode(
+                    {
+                        "kind": "stream_choices",
+                        "entry_id": entry.entry_id,
+                        "type": payload["type"],
+                        "profile": profile,
+                        "id": video_id,
+                        "name": title,
+                        "poster": poster,
+                    }
+                )
+            )
             children.append(
                 _node(
-                    identifier=_encode(
-                        {
-                            "kind": "stream_choices",
-                            "entry_id": entry.entry_id,
-                            "type": payload["type"],
-                            "id": video_id,
-                            "name": title,
-                            "poster": video.get("thumbnail") or meta.get("poster"),
-                        }
-                    ),
+                    identifier=identifier,
                     media_class=MediaClass.EPISODE,
                     media_content_type=MediaType.EPISODE,
                     title=f"E{episode:02d} · {title}",
-                    can_play=False,
-                    can_expand=True,
-                    thumbnail=video.get("thumbnail") or meta.get("poster"),
-                    children_media_class=MediaClass.VIDEO,
+                    can_play=direct,
+                    can_expand=not direct,
+                    thumbnail=poster,
+                    children_media_class=None if direct else MediaClass.VIDEO,
                 )
             )
         return _node(
@@ -537,11 +640,14 @@ class StremioBridgeMediaSource(MediaSource):
             children_media_class=MediaClass.EPISODE,
             children=children,
         )
-
     async def _browse_stream_choices(self, payload: dict[str, Any]) -> BrowseMediaSource:
         entry = self._entry(payload["entry_id"])
         runtime: StremioBridgeRuntime = entry.runtime_data
-        streams = await runtime.manager.get_streams(payload["type"], payload["id"])
+        streams = await runtime.manager.get_streams(
+            payload["type"],
+            payload["id"],
+            str(payload.get("profile") or PROFILE_DEFAULT),
+        )
         return self._build_stream_choices(payload, streams)
 
     async def _stream_choices_node(
@@ -551,13 +657,18 @@ class StremioBridgeMediaSource(MediaSource):
             "kind": "stream_choices",
             "entry_id": payload["entry_id"],
             "type": payload["type"],
+            "profile": str(payload.get("profile") or PROFILE_DEFAULT),
             "id": payload["id"],
             "name": meta.get("name") or payload.get("name") or payload["id"],
             "poster": meta.get("poster") or payload.get("poster"),
         }
         entry = self._entry(payload["entry_id"])
         runtime: StremioBridgeRuntime = entry.runtime_data
-        streams = await runtime.manager.get_streams(payload["type"], payload["id"])
+        streams = await runtime.manager.get_streams(
+            payload["type"],
+            payload["id"],
+            str(payload.get("profile") or PROFILE_DEFAULT),
+        )
         return self._build_stream_choices(stream_payload, streams)
 
     def _build_stream_choices(
@@ -566,23 +677,32 @@ class StremioBridgeMediaSource(MediaSource):
         children: list[BrowseMediaSource] = []
         if streams:
             entry = self._entry(payload["entry_id"])
+            current = {**entry.data, **entry.options}
             ideal_enabled = bool(
-                entry.options.get(CONF_IDEAL_LINK_FILTER, DEFAULT_IDEAL_LINK_FILTER)
+                current.get(CONF_IDEAL_LINK_FILTER, DEFAULT_IDEAL_LINK_FILTER)
             )
+            profile = str(payload.get("profile") or PROFILE_DEFAULT)
             auto_title = (
-                "▶ Enlace ideal · 1080p · más semillas · menor tamaño"
-                if ideal_enabled
-                else "▶ Reproducir automáticamente"
+                "▶ Reproducir evento"
+                if profile == PROFILE_SPORTS
+                else (
+                    "▶ Enlace ideal · 1080p · más semillas · menor tamaño"
+                    if ideal_enabled
+                    else "▶ Reproducir automáticamente"
+                )
             )
             base_video_payload = {
                 "kind": "video",
                 "entry_id": payload["entry_id"],
                 "type": payload["type"],
+                "profile": str(payload.get("profile") or PROFILE_DEFAULT),
                 "id": payload["id"],
                 "selection": "auto",
                 "name": payload.get("name"),
                 "poster": payload.get("poster"),
             }
+            if profile in {PROFILE_LATIN, PROFILE_SPORTS}:
+                base_video_payload["subtitles"] = "off"
             children.append(
                 _node(
                     identifier=_encode(base_video_payload),
@@ -617,6 +737,7 @@ class StremioBridgeMediaSource(MediaSource):
                             "kind": "video",
                             "entry_id": payload["entry_id"],
                             "type": payload["type"],
+                            "profile": str(payload.get("profile") or PROFILE_DEFAULT),
                             "id": payload["id"],
                             "selection": "stream",
                             "stream_key": stream_key(stream),
@@ -647,7 +768,10 @@ class StremioBridgeMediaSource(MediaSource):
     def _browse_search_results(self, payload: dict[str, Any]) -> BrowseMediaSource:
         entry = self._entry(payload["entry_id"])
         runtime: StremioBridgeRuntime = entry.runtime_data
-        children = [self._meta_preview(entry.entry_id, meta) for meta in runtime.last_search_results]
+        children = [
+            self._meta_preview(entry.entry_id, meta, profile=PROFILE_DEFAULT)
+            for meta in runtime.last_search_results
+        ]
         return _node(
             identifier=_encode(payload),
             media_class=MediaClass.DIRECTORY,
@@ -660,33 +784,78 @@ class StremioBridgeMediaSource(MediaSource):
         )
 
     def _meta_preview(
-        self, entry_id: str, meta: dict[str, Any], fallback_type: str = "movie"
+        self,
+        entry_id: str,
+        meta: dict[str, Any],
+        fallback_type: str = "movie",
+        profile: str = PROFILE_DEFAULT,
     ) -> BrowseMediaSource:
         media_type = str(
             meta.get("_bridge_media_type") or meta.get("type") or fallback_type
         )
         media_id = str(meta.get("id") or "")
-        return _node(
-            identifier=_encode(
+        name = str(meta.get("name") or meta.get("title") or media_id)
+        poster = meta.get("poster") or meta.get("background")
+        entry = self._entry(entry_id)
+        direct = self._direct_play_enabled(entry) and media_type != "series"
+        identifier = (
+            self._video_identifier(entry_id, media_type, media_id, name, poster, profile)
+            if direct
+            else _encode(
                 {
                     "kind": "meta",
                     "entry_id": entry_id,
                     "type": media_type,
+                    "profile": profile,
                     "id": media_id,
-                    "name": meta.get("name") or meta.get("title") or media_id,
-                    "poster": meta.get("poster") or meta.get("background"),
+                    "name": name,
+                    "poster": poster,
                 }
-            ),
+            )
+        )
+        return _node(
+            identifier=identifier,
             media_class=_media_class(media_type),
             media_content_type=_media_type(media_type),
-            title=str(meta.get("name") or meta.get("title") or media_id),
-            can_play=False,
-            can_expand=True,
-            thumbnail=meta.get("poster") or meta.get("background"),
+            title=name,
+            can_play=direct,
+            can_expand=not direct,
+            thumbnail=poster,
             children_media_class=(
-                MediaClass.SEASON if media_type == "series" else MediaClass.VIDEO
+                None
+                if direct
+                else (MediaClass.SEASON if media_type == "series" else MediaClass.VIDEO)
             ),
         )
+
+    def _direct_play_enabled(self, entry: ConfigEntry) -> bool:
+        current = {**entry.data, **entry.options}
+        return bool(
+            current.get(CONF_PLAY_IDEAL_ON_SELECT, DEFAULT_PLAY_IDEAL_ON_SELECT)
+        )
+
+    @staticmethod
+    def _video_identifier(
+        entry_id: str,
+        media_type: str,
+        media_id: str,
+        name: str,
+        poster: Any,
+        profile: str,
+    ) -> str:
+        payload: dict[str, Any] = {
+            "kind": "video",
+            "entry_id": entry_id,
+            "type": media_type,
+            "profile": profile,
+            "id": media_id,
+            "selection": "auto",
+            "name": name,
+            "poster": poster,
+        }
+        if profile in {PROFILE_LATIN, PROFILE_SPORTS}:
+            payload["subtitles"] = "off"
+        return _encode(payload)
 
     def _catalog(
         self, runtime: StremioBridgeRuntime, payload: dict[str, Any]
@@ -769,6 +938,16 @@ def _decode(token: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Identifier payload must be an object")
     return payload
+
+
+def _type_title(media_type: str) -> str:
+    return {
+        "movie": "Películas",
+        "series": "Series",
+        "tv": "TV en vivo",
+        "channel": "Canales",
+        "sport": "Deportes",
+    }.get(media_type, media_type.replace("_", " ").title())
 
 
 def _media_class(media_type: str) -> MediaClass:

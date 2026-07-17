@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+- Removed black subtitle outlines/background windows on Google Cast.
+- Added automatic H.264/AAC HLS compatibility mode to fix silent audio.
+- Added direct ideal-link playback on item selection, enabled by default.
+- Added separate configurable Latin Audio and F1/Sports provider profiles.
+- Latin and sports profiles automatically disable external subtitles.
+- Added sports catalog browsing and Latin catalog mirroring.
+- Added profile selection to the `play` action.
+- Fixed migration from older config-entry versions.
+
 ## 0.3.1
 
 - Fixed external subtitles failing silently.

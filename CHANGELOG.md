@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3
+
+- Restored direct stream playback as the default and migrated v0.4 automatic entries back to direct.
+- Kept `automatic` as a backwards-compatible direct-playback alias.
+- Limited `hlsv2` conversion to explicit `force_transcode` mode.
+- Added real validation for generated `hlsv2` playlists.
+- Falls back to the original direct stream whenever HLS audio conversion fails.
+
 ## 0.4.2
 
 - Fixed configured Stremio manifest URLs containing commas being split into invalid fragments.

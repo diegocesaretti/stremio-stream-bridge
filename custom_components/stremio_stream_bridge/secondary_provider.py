@@ -24,7 +24,11 @@ async def install_secondary_stream_provider(
     raw = str(manifest_url or "").strip()
     if not raw:
         return None
-    normalized = StremioAddonClient._normalize_manifest_url(raw)
+    try:
+        normalized = StremioAddonClient._normalize_manifest_url(raw)
+    except StremioProtocolError:
+        _LOGGER.warning("Ignoring invalid secondary stream provider URL: %s", raw)
+        return None
     roles = manager._roles.setdefault(normalized, set())
     roles.add("stream")
     if normalized not in manager._clients:

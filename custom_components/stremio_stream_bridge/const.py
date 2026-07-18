@@ -22,6 +22,7 @@ CONF_PREFER_H264 = "prefer_h264"
 CONF_PREFER_SMALLER_SIZE = "prefer_smaller_size"
 CONF_LATIN_AUDIO_KEYWORDS = "latin_audio_keywords"
 CONF_HIDE_NON_LATIN_ITEMS = "hide_non_latin_items"
+CONF_PREFERRED_AUDIO_LANGUAGES = "preferred_audio_languages"
 CONF_CAST_COMPATIBILITY_FILTER = "cast_compatibility_filter"
 CONF_STOP_BEFORE_PLAY = "stop_before_play"
 CONF_CAST_RESET_BEFORE_PLAY = "cast_reset_before_play"
@@ -57,9 +58,10 @@ DEFAULT_PREFER_SMALLER_SIZE = False
 DEFAULT_LATIN_AUDIO_KEYWORDS = (
     "audio latino, español latino, castellano latino, spanish latino, dual latino, "
     "latino, latina, latam, latinoamérica, latin america, español, castellano, spanish, "
-    "🇦🇷, 🇧🇴, 🇨🇱, 🇨🇴, 🇨🇷, 🇪🇨, 🇲🇽, 🇵🇪, 🇺🇾, 🇻🇪"
+    "lat, esp, spa, es, 🇦🇷, 🇧🇴, 🇨🇱, 🇨🇴, 🇨🇷, 🇪🇨, 🇲🇽, 🇵🇪, 🇺🇾, 🇻🇪"
 )
 DEFAULT_HIDE_NON_LATIN_ITEMS = True
+DEFAULT_PREFERRED_AUDIO_LANGUAGES = "lat, esp, spa, es"
 DEFAULT_CAST_COMPATIBILITY_FILTER = True
 DEFAULT_STOP_BEFORE_PLAY = True
 DEFAULT_CAST_RESET_BEFORE_PLAY = True

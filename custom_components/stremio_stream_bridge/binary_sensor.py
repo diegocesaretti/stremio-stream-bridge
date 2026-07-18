@@ -27,6 +27,7 @@ from .const import (
     CONF_PREFERRED_AUDIO_LANGUAGES,
     CONF_PREFER_H264,
     CONF_PREFER_SMALLER_SIZE,
+    CONF_SECONDARY_STREAM_MANIFEST_URL,
     CONF_STOP_BEFORE_PLAY,
     DEFAULT_AUDIO_MODE,
     DEFAULT_CAST_COMPATIBILITY_FILTER,
@@ -41,12 +42,14 @@ from .const import (
     DEFAULT_PREFERRED_AUDIO_LANGUAGES,
     DEFAULT_PREFER_H264,
     DEFAULT_PREFER_SMALLER_SIZE,
+    DEFAULT_SECONDARY_STREAM_MANIFEST,
     DEFAULT_STOP_BEFORE_PLAY,
     DOMAIN,
     PROFILE_LATIN,
     PROFILE_SPORTS,
 )
 from .options_patch import install_source_options_patch
+from .secondary_provider import install_secondary_stream_provider
 from .server_preferences import install_preferred_audio_languages
 from .source_preferences import install_source_preferences
 from .subtitle_support import is_cast_player
@@ -61,6 +64,14 @@ async def async_setup_entry(
     install_source_options_patch()
     runtime: StremioBridgeRuntime = entry.runtime_data
     current = {**entry.data, **entry.options}
+    await install_secondary_stream_provider(
+        runtime.manager,
+        runtime.server._session,
+        current.get(
+            CONF_SECONDARY_STREAM_MANIFEST_URL,
+            DEFAULT_SECONDARY_STREAM_MANIFEST,
+        ),
+    )
     install_source_preferences(
         runtime.manager,
         prefer_h264=bool(current.get(CONF_PREFER_H264, DEFAULT_PREFER_H264)),
@@ -134,6 +145,10 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
             "external_subtitles_supported": is_cast_player(self.hass, default_player),
             "subtitle_border": "none",
             "audio_mode": current.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE),
+            "secondary_stream_manifest_url": current.get(
+                CONF_SECONDARY_STREAM_MANIFEST_URL,
+                DEFAULT_SECONDARY_STREAM_MANIFEST,
+            ),
             "cast_compatibility_filter": current.get(
                 CONF_CAST_COMPATIBILITY_FILTER, DEFAULT_CAST_COMPATIBILITY_FILTER
             ),

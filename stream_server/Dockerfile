@@ -27,6 +27,25 @@ RUN git clone --depth 1 --branch "${STREAM_SERVER_REF}" \
 
 WORKDIR /src
 
+# async-rar's unity source extinfo.cpp already includes hardlinks.cpp, but the
+# pinned upstream build script also compiles hardlinks.cpp independently. GNU
+# ld reports the duplicate ExtractHardlink symbol on aarch64, so exclude the
+# separately compiled source just like the script does for its other includes.
+RUN python3 - <<'PY'
+from pathlib import Path
+
+path = Path("bindings/async-rar/build.rs")
+content = path.read_text(encoding="utf-8")
+old = '''                "win32lnk.cpp" // Windows-specific, included conditionally
+'''
+new = '''                "win32lnk.cpp" |        // Windows-specific, included conditionally
+                "hardlinks.cpp"        // included by extinfo.cpp
+'''
+if old not in content:
+    raise SystemExit("Expected upstream async-rar exclusion block was not found")
+path.write_text(content.replace(old, new, 1), encoding="utf-8")
+PY
+
 # Use the backend built and tested by the upstream Linux release workflow.
 RUN cargo build --locked --release -p server \
     --no-default-features --features libtorrent

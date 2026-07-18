@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.6
+
+- Convierte `Tamaño máximo en GB` en un filtro obligatorio: una fuente con tamaño conocido superior al límite nunca se selecciona ni como fallback.
+- Añade opciones independientes para preferir H.264/x264 y para usar el menor tamaño como último desempate. Ambas quedan desactivadas por defecto para instalaciones que transcodifican todo.
+- Desactiva la penalización de compatibilidad directa cuando está activo `force_transcode`, porque el receptor recibe la salida codificada y no el contenedor original.
+- Permite editar las palabras clave usadas por el perfil Audio Español/Latino en nombre, título, descripción y `behaviorHints.filename`.
+- Añade la opción de ocultar del catálogo Español/Latino los títulos para los que se confirma que no existe ninguna fuente coincidente. Usa concurrencia limitada, caché de 30 minutos y conserva tarjetas ante errores temporales.
+- En series comprueba una muestra representativa de episodios —inicio, mitad y final— para evitar consultar una temporada completa al abrir el catálogo.
+- Añade códigos preferidos de pista interna `lat, esp, spa, es`; el bridge los envía como `audioLanguages` a builds compatibles del stream-server GPU y conserva la pista predeterminada cuando no hay coincidencia.
+- Añade un `manifest.json` opcional para un segundo proveedor principal de streams. Sus resultados se fusionan y deduplican con los proveedores principales y sus fallas no bloquean la integración.
+
 ## 0.5.5
 
 - Audio Latino reutiliza los mismos proveedores generales de streams y filtra por palabras presentes en el nombre, título, descripción o filename del torrent.

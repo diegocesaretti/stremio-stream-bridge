@@ -24,6 +24,21 @@ RUN git clone --depth 1 --branch "${STREAM_SERVER_REF}" \
 
 WORKDIR /src
 
+# Upstream server v0.1.8 declares enginefs without disabling its default
+# `libtorrent` feature. Without this narrow patch Cargo compiles libtorrent
+# even when the server is built explicitly with only `librqbit` enabled.
+RUN python3 - <<'PY'
+from pathlib import Path
+
+path = Path("server/Cargo.toml")
+content = path.read_text(encoding="utf-8")
+old = 'enginefs = { path = "../enginefs" }'
+new = 'enginefs = { path = "../enginefs", default-features = false }'
+if old not in content:
+    raise SystemExit("Expected upstream enginefs dependency declaration was not found")
+path.write_text(content.replace(old, new, 1), encoding="utf-8")
+PY
+
 RUN cargo build --locked --release -p server \
     --no-default-features --features librqbit
 

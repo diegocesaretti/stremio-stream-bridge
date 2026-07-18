@@ -44,6 +44,8 @@ from .const import (
     PROFILE_LATIN,
     PROFILE_SPORTS,
 )
+from .options_patch import install_source_options_patch
+from .source_preferences import install_source_preferences
 from .subtitle_support import is_cast_player
 
 
@@ -53,9 +55,11 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the connectivity sensor and entry-scoped source preferences."""
+    install_source_options_patch()
     runtime: StremioBridgeRuntime = entry.runtime_data
     current = {**entry.data, **entry.options}
-    runtime.manager.configure_source_selection(
+    install_source_preferences(
+        runtime.manager,
         prefer_h264=bool(current.get(CONF_PREFER_H264, DEFAULT_PREFER_H264)),
         prefer_smaller_size=bool(
             current.get(CONF_PREFER_SMALLER_SIZE, DEFAULT_PREFER_SMALLER_SIZE)

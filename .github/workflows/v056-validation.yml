@@ -1,0 +1,51 @@
+name: Validate Stremio Stream Bridge
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test runner
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Compile integration modules
+        run: python -m compileall -q custom_components/stremio_stream_bridge
+
+      - name: Validate JSON files
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          files = [
+              Path("custom_components/stremio_stream_bridge/manifest.json"),
+              Path("custom_components/stremio_stream_bridge/strings.json"),
+              Path("custom_components/stremio_stream_bridge/translations/en.json"),
+              Path("custom_components/stremio_stream_bridge/translations/es.json"),
+          ]
+          for path in files:
+              json.loads(path.read_text(encoding="utf-8"))
+              print(f"validated {path}")
+          PY
+
+      - name: Run focused regression tests
+        run: |
+          pytest -q \
+            tests/test_name_codec_filter.py \
+            tests/test_optional_source_ranking.py \
+            tests/test_spanish_audio_preferences.py \
+            tests/test_audio_language_and_secondary_provider.py

@@ -18,6 +18,10 @@ CONF_PREFERRED_QUALITY = "preferred_quality"
 CONF_MAX_SIZE_GB = "max_size_gb"
 CONF_EXCLUDE_KEYWORDS = "exclude_keywords"
 CONF_IDEAL_LINK_FILTER = "ideal_link_filter"
+CONF_PREFER_H264 = "prefer_h264"
+CONF_PREFER_SMALLER_SIZE = "prefer_smaller_size"
+CONF_LATIN_AUDIO_KEYWORDS = "latin_audio_keywords"
+CONF_HIDE_NON_LATIN_ITEMS = "hide_non_latin_items"
 CONF_CAST_COMPATIBILITY_FILTER = "cast_compatibility_filter"
 CONF_STOP_BEFORE_PLAY = "stop_before_play"
 CONF_CAST_RESET_BEFORE_PLAY = "cast_reset_before_play"
@@ -48,6 +52,14 @@ DEFAULT_PREFERRED_QUALITY = "1080p"
 DEFAULT_MAX_SIZE_GB = 12.0
 DEFAULT_EXCLUDE_KEYWORDS = "CAM, HDCAM, TS, TELECINE, SCREENER"
 DEFAULT_IDEAL_LINK_FILTER = True
+DEFAULT_PREFER_H264 = False
+DEFAULT_PREFER_SMALLER_SIZE = False
+DEFAULT_LATIN_AUDIO_KEYWORDS = (
+    "audio latino, español latino, castellano latino, spanish latino, dual latino, "
+    "latino, latina, latam, latinoamérica, latin america, español, castellano, spanish, "
+    "🇦🇷, 🇧🇴, 🇨🇱, 🇨🇴, 🇨🇷, 🇪🇨, 🇲🇽, 🇵🇪, 🇺🇾, 🇻🇪"
+)
+DEFAULT_HIDE_NON_LATIN_ITEMS = True
 DEFAULT_CAST_COMPATIBILITY_FILTER = True
 DEFAULT_STOP_BEFORE_PLAY = True
 DEFAULT_CAST_RESET_BEFORE_PLAY = True

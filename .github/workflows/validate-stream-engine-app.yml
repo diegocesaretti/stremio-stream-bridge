@@ -1,0 +1,50 @@
+name: Validate Stream Engine App
+
+on:
+  push:
+    paths:
+      - "repository.yaml"
+      - "stream_server/**"
+      - ".github/workflows/validate-stream-engine-app.yml"
+  pull_request:
+    paths:
+      - "repository.yaml"
+      - "stream_server/**"
+      - ".github/workflows/validate-stream-engine-app.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate YAML and shell
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          for path in [Path("repository.yaml"), *Path("stream_server").rglob("*.yaml")]:
+              with path.open(encoding="utf-8") as stream:
+                  yaml.safe_load(stream)
+              print(f"Validated {path}")
+          PY
+          bash -n stream_server/run.sh
+
+      - name: Build amd64 app image
+        run: |
+          docker build \
+            --build-arg BUILD_VERSION=0.1.0 \
+            --build-arg BUILD_ARCH=amd64 \
+            --tag stremio-stream-engine:test \
+            stream_server
+
+      - name: Inspect image
+        run: |
+          docker image inspect stremio-stream-engine:test >/dev/null

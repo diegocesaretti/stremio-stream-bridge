@@ -24,6 +24,7 @@ from .const import (
     CONF_LATIN_AUDIO_KEYWORDS,
     CONF_PLAYBACK_START_TIMEOUT,
     CONF_PLAY_IDEAL_ON_SELECT,
+    CONF_PREFERRED_AUDIO_LANGUAGES,
     CONF_PREFER_H264,
     CONF_PREFER_SMALLER_SIZE,
     CONF_STOP_BEFORE_PLAY,
@@ -37,6 +38,7 @@ from .const import (
     DEFAULT_LATIN_AUDIO_KEYWORDS,
     DEFAULT_PLAYBACK_START_TIMEOUT,
     DEFAULT_PLAY_IDEAL_ON_SELECT,
+    DEFAULT_PREFERRED_AUDIO_LANGUAGES,
     DEFAULT_PREFER_H264,
     DEFAULT_PREFER_SMALLER_SIZE,
     DEFAULT_STOP_BEFORE_PLAY,
@@ -45,6 +47,7 @@ from .const import (
     PROFILE_SPORTS,
 )
 from .options_patch import install_source_options_patch
+from .server_preferences import install_preferred_audio_languages
 from .source_preferences import install_source_preferences
 from .subtitle_support import is_cast_player
 
@@ -72,6 +75,13 @@ async def async_setup_entry(
         ),
         force_transcode=current.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE)
         == "force_transcode",
+    )
+    install_preferred_audio_languages(
+        runtime.server,
+        current.get(
+            CONF_PREFERRED_AUDIO_LANGUAGES,
+            DEFAULT_PREFERRED_AUDIO_LANGUAGES,
+        ),
     )
     async_add_entities([StremioBridgeConnectivitySensor(entry, runtime)])
 
@@ -133,6 +143,10 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
             ),
             "spanish_audio_keywords": current.get(
                 CONF_LATIN_AUDIO_KEYWORDS, DEFAULT_LATIN_AUDIO_KEYWORDS
+            ),
+            "preferred_audio_languages": current.get(
+                CONF_PREFERRED_AUDIO_LANGUAGES,
+                DEFAULT_PREFERRED_AUDIO_LANGUAGES,
             ),
             "hide_without_spanish_audio": current.get(
                 CONF_HIDE_NON_LATIN_ITEMS, DEFAULT_HIDE_NON_LATIN_ITEMS

@@ -11,10 +11,12 @@ from homeassistant.helpers.selector import BooleanSelector, TextSelector, TextSe
 from .const import (
     CONF_HIDE_NON_LATIN_ITEMS,
     CONF_LATIN_AUDIO_KEYWORDS,
+    CONF_PREFERRED_AUDIO_LANGUAGES,
     CONF_PREFER_H264,
     CONF_PREFER_SMALLER_SIZE,
     DEFAULT_HIDE_NON_LATIN_ITEMS,
     DEFAULT_LATIN_AUDIO_KEYWORDS,
+    DEFAULT_PREFERRED_AUDIO_LANGUAGES,
     DEFAULT_PREFER_H264,
     DEFAULT_PREFER_SMALLER_SIZE,
 )
@@ -56,6 +58,15 @@ def install_source_options_patch() -> None:
                         DEFAULT_HIDE_NON_LATIN_ITEMS,
                     ),
                 ): BooleanSelector(),
+                vol.Required(
+                    CONF_PREFERRED_AUDIO_LANGUAGES,
+                    default=str(
+                        displayed.get(
+                            CONF_PREFERRED_AUDIO_LANGUAGES,
+                            DEFAULT_PREFERRED_AUDIO_LANGUAGES,
+                        )
+                    ),
+                ): TextSelector(TextSelectorConfig(multiline=False)),
                 vol.Required(
                     CONF_PREFER_H264,
                     default=displayed.get(CONF_PREFER_H264, DEFAULT_PREFER_H264),

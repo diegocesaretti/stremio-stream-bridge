@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .aggregator import StremioAddonManager
 from .api import StremioBridgeError, StremioStreamServerClient
 from .const import DEFAULT_SCAN_INTERVAL_SECONDS, DOMAIN
+from .server_diagnostics import async_get_casting_diagnostics
 
 
 class StremioBridgeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -38,8 +39,10 @@ class StremioBridgeCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             addons = await self.manager.async_refresh()
         except StremioBridgeError as err:
             raise UpdateFailed(str(err)) from err
+        casting_diagnostics = await async_get_casting_diagnostics(self.server)
         return {
             "settings": settings,
+            "casting_diagnostics": casting_diagnostics,
             "addons": [
                 {
                     "id": addon.id,

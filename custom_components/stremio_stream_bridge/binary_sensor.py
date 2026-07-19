@@ -49,6 +49,8 @@ from .const import (
     PROFILE_LATIN,
     PROFILE_SPORTS,
 )
+from .latin_fallback import install_latin_stream_fallback
+from .latin_search_patch import install_latin_media_search_patch
 from .options_patch import install_source_options_patch
 from .secondary_provider import install_secondary_stream_provider
 from .server_preferences import install_preferred_audio_languages
@@ -63,6 +65,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the connectivity sensor and entry-scoped source preferences."""
     install_source_options_patch()
+    install_latin_media_search_patch()
     runtime: StremioBridgeRuntime = entry.runtime_data
     current = {**entry.data, **entry.options}
     await install_secondary_stream_provider(
@@ -88,6 +91,7 @@ async def async_setup_entry(
         force_transcode=current.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE)
         == "force_transcode",
     )
+    install_latin_stream_fallback(runtime.manager)
     install_preferred_audio_languages(
         runtime.server,
         current.get(
@@ -125,6 +129,9 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
         data = self.coordinator.data or {}
         settings = data.get("settings", {})
         values = settings.get("values", settings) if isinstance(settings, dict) else {}
+        diagnostics = data.get("casting_diagnostics", {})
+        if not isinstance(diagnostics, dict):
+            diagnostics = {}
         addons = data.get("addons", [])
         errors = data.get("addon_errors", {})
         default_player = self._entry.options.get(
@@ -136,6 +143,14 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
             "server_version": values.get("serverVersion")
             if isinstance(values, dict)
             else None,
+            "cast_diagnostics_available": diagnostics.get("available", False),
+            "cast_selected_encoder": diagnostics.get("selected_encoder"),
+            "cast_nvenc_usable": diagnostics.get("nvenc_usable"),
+            "cast_hardware_ready": diagnostics.get("hardware_ready", False),
+            "cast_diagnostics_reason": diagnostics.get("reason"),
+            "hls_hardware_log_expected": (
+                'HLS transcoder selected ... encoder="h264_nvenc" hardware=true'
+            ),
             "addons": addons,
             "addon_count": len(addons) if isinstance(addons, list) else 0,
             "addon_errors": errors,

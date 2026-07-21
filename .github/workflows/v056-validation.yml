@@ -48,4 +48,8 @@ jobs:
             tests/test_name_codec_filter.py \
             tests/test_optional_source_ranking.py \
             tests/test_spanish_audio_preferences.py \
-            tests/test_audio_language_and_secondary_provider.py
+            tests/test_audio_language_and_secondary_provider.py \
+            tests/test_latin_provider_fallback.py \
+            tests/test_latin_search_filter.py \
+            tests/test_server_diagnostics.py \
+            tests/test_secondary_provider_marker.py

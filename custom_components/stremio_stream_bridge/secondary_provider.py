@@ -8,6 +8,7 @@ from typing import Any
 from .api import StremioAddonClient, StremioProtocolError
 
 _LOGGER = logging.getLogger(__name__)
+_SECONDARY_PROVIDER_ATTR = "_bridge_secondary_stream_provider_url"
 
 
 async def install_secondary_stream_provider(
@@ -17,18 +18,21 @@ async def install_secondary_stream_provider(
 ) -> str | None:
     """Register one optional stream manifest beside the main providers.
 
-    The manager already merges and deduplicates streams across every provider with
-    the ``stream`` role. Refresh failures are retained in ``manager.errors`` and do
-    not remove successfully loaded primary providers.
+    Normal playback still merges this source with the configured primary providers.
+    The normalized URL is also retained on the manager so the Latin profile can query
+    primary providers first and contact this sparse fallback only when necessary.
     """
     raw = str(manifest_url or "").strip()
     if not raw:
+        setattr(manager, _SECONDARY_PROVIDER_ATTR, None)
         return None
     try:
         normalized = StremioAddonClient._normalize_manifest_url(raw)
     except StremioProtocolError:
+        setattr(manager, _SECONDARY_PROVIDER_ATTR, None)
         _LOGGER.warning("Ignoring invalid secondary stream provider URL: %s", raw)
         return None
+    setattr(manager, _SECONDARY_PROVIDER_ATTR, normalized)
     roles = manager._roles.setdefault(normalized, set())
     roles.add("stream")
     if normalized not in manager._clients:

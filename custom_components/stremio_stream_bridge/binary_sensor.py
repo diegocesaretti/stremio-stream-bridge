@@ -33,6 +33,8 @@ from .const import (
     CONF_FALLBACK_SOURCE_COUNT,
     CONF_HIDE_NON_LATIN_ITEMS,
     CONF_LATIN_AUDIO_KEYWORDS,
+    CONF_LOW_POWER_STREAM_SERVER,
+    CONF_MIN_TORRENT_SEEDERS,
     CONF_PLAYBACK_START_TIMEOUT,
     CONF_PLAY_IDEAL_ON_SELECT,
     CONF_PREFERRED_AUDIO_LANGUAGES,
@@ -50,6 +52,8 @@ from .const import (
     DEFAULT_FALLBACK_SOURCE_COUNT,
     DEFAULT_HIDE_NON_LATIN_ITEMS,
     DEFAULT_LATIN_AUDIO_KEYWORDS,
+    DEFAULT_LOW_POWER_STREAM_SERVER,
+    DEFAULT_MIN_TORRENT_SEEDERS,
     DEFAULT_PLAYBACK_START_TIMEOUT,
     DEFAULT_PLAY_IDEAL_ON_SELECT,
     DEFAULT_PREFERRED_AUDIO_LANGUAGES,
@@ -66,6 +70,7 @@ from .latin_search_patch import install_latin_media_search_patch
 from .options_patch import install_source_options_patch
 from .secondary_provider import install_secondary_stream_provider
 from .server_preferences import install_preferred_audio_languages
+from .source_policy import install_runtime_source_policy
 from .source_preferences import install_source_preferences
 from .subtitle_support import is_cast_player
 
@@ -93,6 +98,9 @@ async def async_setup_entry(
     )
     account_runtime = await async_install_account_bridge(hass, entry, runtime)
 
+    low_power_stream_server = bool(
+        current.get(CONF_LOW_POWER_STREAM_SERVER, DEFAULT_LOW_POWER_STREAM_SERVER)
+    )
     install_source_preferences(
         runtime.manager,
         prefer_h264=bool(current.get(CONF_PREFER_H264, DEFAULT_PREFER_H264)),
@@ -105,10 +113,20 @@ async def async_setup_entry(
         hide_non_latin_items=bool(
             current.get(CONF_HIDE_NON_LATIN_ITEMS, DEFAULT_HIDE_NON_LATIN_ITEMS)
         ),
-        force_transcode=current.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE)
-        == "force_transcode",
+        force_transcode=(
+            current.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE) == "force_transcode"
+            and not low_power_stream_server
+        ),
     )
     install_latin_stream_fallback(runtime.manager)
+    install_runtime_source_policy(
+        runtime.manager,
+        min_torrent_seeders=int(
+            current.get(CONF_MIN_TORRENT_SEEDERS, DEFAULT_MIN_TORRENT_SEEDERS)
+            or 0
+        ),
+        low_power_stream_server=low_power_stream_server,
+    )
     install_preferred_audio_languages(
         runtime.server,
         current.get(
@@ -165,6 +183,9 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
             self._entry.data.get(CONF_DEFAULT_MEDIA_PLAYER),
         )
         current = {**self._entry.data, **self._entry.options}
+        low_power_stream_server = current.get(
+            CONF_LOW_POWER_STREAM_SERVER, DEFAULT_LOW_POWER_STREAM_SERVER
+        )
         return {
             "server_version": values.get("serverVersion")
             if isinstance(values, dict)
@@ -187,6 +208,11 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
             "external_subtitles_supported": is_cast_player(self.hass, default_player),
             "subtitle_border": "none",
             "audio_mode": current.get(CONF_AUDIO_MODE, DEFAULT_AUDIO_MODE),
+            "low_power_stream_server": low_power_stream_server,
+            "transcoding_allowed": not bool(low_power_stream_server),
+            "min_torrent_seeders": current.get(
+                CONF_MIN_TORRENT_SEEDERS, DEFAULT_MIN_TORRENT_SEEDERS
+            ),
             "secondary_stream_manifest_url": current.get(
                 CONF_SECONDARY_STREAM_MANIFEST_URL,
                 DEFAULT_SECONDARY_STREAM_MANIFEST,

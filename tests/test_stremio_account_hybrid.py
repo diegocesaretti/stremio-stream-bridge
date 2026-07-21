@@ -118,7 +118,7 @@ class FakeSession:
         return FakeResponse()
 
 
-def test_progress_update_preserves_library_item_and_writes_resume_offset() -> None:
+def test_progress_update_preserves_item_and_counts_real_advance() -> None:
     session = FakeSession()
     client = ACCOUNT.StremioAccountClient(
         session, email="diego@example.com", auth_key="secret-auth-key"
@@ -131,7 +131,7 @@ def test_progress_update_preserves_library_item_and_writes_resume_offset() -> No
             "timeOffset": 1_000,
             "timeWatched": 55_000,
             "duration": 100_000,
-            "video_id": "tt1234567:1:1",
+            "video_id": "tt1234567:2:3",
             "customField": "preserve-me",
         },
     }
@@ -155,6 +155,7 @@ def test_progress_update_preserves_library_item_and_writes_resume_offset() -> No
     assert changed["state"]["video_id"] == "tt1234567:2:3"
     assert changed["state"]["season"] == 2
     assert changed["state"]["episode"] == 3
-    assert changed["state"]["timeWatched"] == 55_000
+    assert changed["state"]["timeWatched"] == 66_500
+    assert changed["state"]["overallTimeWatched"] == 11_500
     assert changed["state"]["customField"] == "preserve-me"
-    assert original["state"]["video_id"] == "tt1234567:1:1"
+    assert original["state"]["video_id"] == "tt1234567:2:3"

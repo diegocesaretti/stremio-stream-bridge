@@ -55,4 +55,5 @@ jobs:
             tests/test_secondary_provider_marker.py
 
       - name: Run Stremio account hybrid tests
+        if: always()
         run: pytest -q tests/test_stremio_account_hybrid.py

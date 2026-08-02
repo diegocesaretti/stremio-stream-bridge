@@ -21,6 +21,7 @@ from .account_bridge import (
 from .account_media_patch import install_account_media_patch
 from .account_options_patch import install_account_options_patch
 from .account_playback_tracker import StremioAccountPlaybackTracker
+from .cache_cleanup import StreamServerCacheCleanupTracker
 from .const import (
     CONF_ACCOUNT_ENABLED,
     CONF_ACCOUNT_PROVIDER_MODE,
@@ -88,9 +89,10 @@ async def async_setup_entry(
 
     runtime: StremioBridgeRuntime = entry.runtime_data
     current = {**entry.data, **entry.options}
+    session = async_get_clientsession(hass)
     await install_secondary_stream_provider(
         runtime.manager,
-        async_get_clientsession(hass),
+        session,
         current.get(
             CONF_SECONDARY_STREAM_MANIFEST_URL,
             DEFAULT_SECONDARY_STREAM_MANIFEST,
@@ -135,8 +137,9 @@ async def async_setup_entry(
         ),
     )
 
+    cache_cleanup = StreamServerCacheCleanupTracker(hass, entry, session)
     entities: list[BinarySensorEntity] = [
-        StremioBridgeConnectivitySensor(entry, runtime)
+        StremioBridgeConnectivitySensor(entry, runtime, cache_cleanup)
     ]
     if account_runtime is not None:
         account_runtime.tracker = StremioAccountPlaybackTracker(
@@ -153,9 +156,15 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_name = "Conectividad"
 
-    def __init__(self, entry: ConfigEntry, runtime: StremioBridgeRuntime) -> None:
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        runtime: StremioBridgeRuntime,
+        cache_cleanup: StreamServerCacheCleanupTracker,
+    ) -> None:
         super().__init__(runtime.coordinator)
         self._entry = entry
+        self._cache_cleanup = cache_cleanup
         self._attr_unique_id = f"{entry.entry_id}_connectivity"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -268,6 +277,10 @@ class StremioBridgeConnectivitySensor(CoordinatorEntity, BinarySensorEntity):
                 PROFILE_SPORTS
             ),
         }
+
+    async def async_will_remove_from_hass(self) -> None:
+        await super().async_will_remove_from_hass()
+        await self._cache_cleanup.async_stop()
 
 
 class StremioAccountLinkedSensor(CoordinatorEntity, BinarySensorEntity):

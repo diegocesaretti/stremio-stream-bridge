@@ -58,6 +58,10 @@ jobs:
         if: always()
         run: pytest -q tests/test_seed_and_low_power_policy.py
 
+      - name: Run playback cache cleanup tests
+        if: always()
+        run: pytest -q tests/test_cache_cleanup.py
+
       - name: Run Stremio account hybrid tests
         if: always()
         run: pytest -q tests/test_stremio_account_hybrid.py

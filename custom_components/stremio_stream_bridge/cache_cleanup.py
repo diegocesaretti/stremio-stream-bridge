@@ -9,10 +9,20 @@ from urllib.parse import urlsplit, urlunsplit
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
+from homeassistant.const import EVENT_CALL_SERVICE
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import CONF_STREAMING_SERVER_URL, DEFAULT_STREAMING_SERVER_URL
+from .const import (
+    ATTR_ENTRY_ID,
+    ATTR_MEDIA_PLAYER,
+    CONF_DEFAULT_MEDIA_PLAYER,
+    CONF_STREAMING_SERVER_URL,
+    DEFAULT_STREAMING_SERVER_URL,
+    DOMAIN,
+    SERVICE_PLAY,
+    SERVICE_PLAY_URL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _CLEANUP_DELAY_SECONDS = 30
@@ -36,6 +46,27 @@ class StreamServerCacheCleanupTracker:
         self._player: str | None = None
         self._state_unsub = None
         self._cleanup_task: asyncio.Task[None] | None = None
+        self._service_unsub = hass.bus.async_listen(
+            EVENT_CALL_SERVICE,
+            self._handle_service_call,
+        )
+
+    @callback
+    def _handle_service_call(self, event: Event) -> None:
+        data = event.data
+        if data.get("domain") != DOMAIN:
+            return
+        if data.get("service") not in {SERVICE_PLAY, SERVICE_PLAY_URL}:
+            return
+        service_data = data.get("service_data", {})
+        if not isinstance(service_data, dict):
+            return
+        requested_entry = service_data.get(ATTR_ENTRY_ID)
+        if requested_entry and requested_entry != self.entry.entry_id:
+            return
+        player = service_data.get(ATTR_MEDIA_PLAYER) or self._default_player()
+        if isinstance(player, str) and player:
+            self.prepare(player)
 
     def prepare(self, player: str) -> None:
         """Track the physical player used by the next bridge playback."""
@@ -130,10 +161,18 @@ class StreamServerCacheCleanupTracker:
         netloc = f"{host}:{_CONTROL_PORT}"
         return urlunsplit((parsed.scheme, netloc, "/cleanup", "", ""))
 
+    def _default_player(self) -> str | None:
+        current = {**self.entry.data, **self.entry.options}
+        player = current.get(CONF_DEFAULT_MEDIA_PLAYER)
+        return str(player) if player else None
+
     async def async_stop(self) -> None:
         """Remove listeners and cancel a pending cleanup."""
         self._cancel_cleanup()
         if self._state_unsub is not None:
             self._state_unsub()
             self._state_unsub = None
+        if self._service_unsub is not None:
+            self._service_unsub()
+            self._service_unsub = None
         self._player = None

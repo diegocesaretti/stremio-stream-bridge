@@ -62,6 +62,10 @@ jobs:
         if: always()
         run: pytest -q tests/test_cache_cleanup.py
 
+      - name: Run next-episode resolver tests
+        if: always()
+        run: pytest -q tests/test_next_episode_resolver.py
+
       - name: Run Stremio account hybrid tests
         if: always()
         run: pytest -q tests/test_stremio_account_hybrid.py

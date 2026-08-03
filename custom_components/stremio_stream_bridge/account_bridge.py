@@ -29,6 +29,7 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 _REGISTRY_KEY = "account_runtimes"
 _PATCH_ATTR = "_bridge_account_coordinator_patched"
+_ACCOUNT_RUNTIME_ATTR = "_bridge_account_runtime"
 
 
 class AccountAddonClient(StremioAddonClient):
@@ -77,8 +78,16 @@ class StremioAccountRuntime:
 
 
 def remove_account_runtime(hass: HomeAssistant, entry_id: str) -> None:
-    """Forget one entry-scoped account runtime."""
-    _registry(hass).pop(entry_id, None)
+    """Forget one entry-scoped account runtime and detach it from its manager."""
+    runtime = _registry(hass).pop(entry_id, None)
+    entry = hass.config_entries.async_get_entry(entry_id)
+    bridge_runtime = getattr(entry, "runtime_data", None) if entry is not None else None
+    manager = getattr(bridge_runtime, "manager", None)
+    if (
+        manager is not None
+        and getattr(manager, _ACCOUNT_RUNTIME_ATTR, None) is runtime
+    ):
+        delattr(manager, _ACCOUNT_RUNTIME_ATTR)
 
 
 def get_account_runtime(
@@ -98,6 +107,8 @@ async def async_install_account_bridge(
     current = {**entry.data, **entry.options}
     if not bool(current.get(CONF_ACCOUNT_ENABLED, DEFAULT_ACCOUNT_ENABLED)):
         _registry(hass).pop(entry.entry_id, None)
+        if hasattr(bridge_runtime.manager, _ACCOUNT_RUNTIME_ATTR):
+            delattr(bridge_runtime.manager, _ACCOUNT_RUNTIME_ATTR)
         return None
     email = str(current.get(CONF_ACCOUNT_EMAIL, "") or "").strip()
     auth_key = str(current.get(CONF_ACCOUNT_AUTH_KEY, "") or "").strip()
@@ -131,6 +142,7 @@ async def async_install_account_bridge(
         private_urls=private_urls,
     )
     _registry(hass)[entry.entry_id] = runtime
+    setattr(bridge_runtime.manager, _ACCOUNT_RUNTIME_ATTR, runtime)
     install_account_coordinator_redaction(hass)
     return runtime
 
@@ -218,7 +230,9 @@ def install_account_coordinator_redaction(hass: HomeAssistant) -> None:
             data["addons"] = [
                 {
                     **addon,
-                    "manifest_url": account_url_id(str(addon.get("manifest_url") or "")),
+                    "manifest_url": account_url_id(
+                        str(addon.get("manifest_url") or "")
+                    ),
                     "source": "stremio_account",
                 }
                 if str(addon.get("manifest_url") or "") in private_urls
@@ -248,7 +262,10 @@ def _private_urls_for_manager(hass: HomeAssistant, manager: Any) -> set[str]:
         if bridge_entry is None:
             continue
         bridge_runtime = getattr(bridge_entry, "runtime_data", None)
-        if bridge_runtime is not None and getattr(bridge_runtime, "manager", None) is manager:
+        if (
+            bridge_runtime is not None
+            and getattr(bridge_runtime, "manager", None) is manager
+        ):
             return set(runtime.private_urls)
     return set()
 

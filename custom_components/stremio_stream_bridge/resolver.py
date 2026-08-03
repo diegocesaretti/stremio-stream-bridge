@@ -24,11 +24,18 @@ from .stream_selector import order_ideal_streams, parse_seeders
 _LOGGER = logging.getLogger(__name__)
 _YEAR_PATTERN = re.compile(r"(?<!\d)(?:18|19|20|21)\d{2}(?!\d)")
 _PUBLIC_RESULT_KEYS = (
-    "media_id", "media_type", "title", "year", "poster", "background", "description"
+    "media_id",
+    "media_type",
+    "title",
+    "year",
+    "poster",
+    "background",
+    "description",
 )
 _MAX_STREAM_PROBES = 5
 _MAX_EPISODE_PROBES = 120
 _STREAM_PROBE_CONCURRENCY = 6
+_ACCOUNT_RUNTIME_ATTR = "_bridge_account_runtime"
 
 StreamOrderer = Callable[[list[dict[str, Any]], str], list[dict[str, Any]]]
 
@@ -58,6 +65,7 @@ class StreamBackedSelection:
     seeders: int
     has_stream: bool
     order: int
+    account_priority: int = 0
 
 
 def normalize_title(value: object) -> str:
@@ -84,8 +92,15 @@ def extract_year(value: object) -> int | None:
     return int(match.group(0)) if match else None
 
 
-def normalize_public_result(meta: dict[str, Any], media_type: str | None = None) -> dict[str, Any]:
-    resolved_type = media_type or meta.get("_bridge_media_type") or meta.get("type") or None
+def normalize_public_result(
+    meta: dict[str, Any], media_type: str | None = None
+) -> dict[str, Any]:
+    resolved_type = (
+        media_type
+        or meta.get("_bridge_media_type")
+        or meta.get("type")
+        or None
+    )
     title = meta.get("name") or meta.get("title") or ""
     result: dict[str, Any] = {
         "media_id": meta.get("id") or meta.get("media_id") or None,
@@ -99,7 +114,9 @@ def normalize_public_result(meta: dict[str, Any], media_type: str | None = None)
     return {key: result[key] for key in _PUBLIC_RESULT_KEYS}
 
 
-def _usable_public_results(raw_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _usable_public_results(
+    raw_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for raw in raw_results:
         public = normalize_public_result(raw)
@@ -108,17 +125,30 @@ def _usable_public_results(raw_results: list[dict[str, Any]]) -> list[dict[str, 
     return results
 
 
-async def async_search_and_store(runtime: SearchRuntime, query: str, media_type: str = "all") -> dict[str, Any]:
+async def async_search_and_store(
+    runtime: SearchRuntime, query: str, media_type: str = "all"
+) -> dict[str, Any]:
     clean_query = query.strip()
     media_types = ("movie", "series") if media_type == "all" else (media_type,)
     runtime.last_search_query = clean_query
     raw_results = await runtime.manager.search(clean_query, media_types)
     runtime.last_search_results = raw_results
     results = _usable_public_results(raw_results)
-    return {"ok": True, "query": clean_query, "media_type": media_type, "count": len(results), "results": results}
+    return {
+        "ok": True,
+        "query": clean_query,
+        "media_type": media_type,
+        "count": len(results),
+        "results": results,
+    }
 
 
-def rank_results(raw_results: list[dict[str, Any]], query: str, *, requested_year: int | None = None) -> list[RankedResult]:
+def rank_results(
+    raw_results: list[dict[str, Any]],
+    query: str,
+    *,
+    requested_year: int | None = None,
+) -> list[RankedResult]:
     normalized_query = normalize_title(query)
     query_words = set(normalized_query.split())
     ranked: list[RankedResult] = []
@@ -133,7 +163,11 @@ def rank_results(raw_results: list[dict[str, Any]], query: str, *, requested_yea
         exact_title = normalized_candidate == normalized_query
         starts_query = normalized_candidate.startswith(normalized_query)
         ratio = SequenceMatcher(None, normalized_query, normalized_candidate).ratio()
-        overlap = len(query_words & candidate_words) / len(query_words) if query_words else 0.0
+        overlap = (
+            len(query_words & candidate_words) / len(query_words)
+            if query_words
+            else 0.0
+        )
         candidate_year = public["year"]
         year_matches = requested_year is None or candidate_year == requested_year
         score = ratio * 100.0 + overlap * 55.0
@@ -144,14 +178,32 @@ def rank_results(raw_results: list[dict[str, Any]], query: str, *, requested_yea
         if requested_year is not None:
             score += 240.0 if candidate_year == requested_year else -240.0
         score -= index * 0.001
-        ranked.append(RankedResult(public, raw, index, score, ratio, overlap, exact_title, year_matches))
+        ranked.append(
+            RankedResult(
+                public,
+                raw,
+                index,
+                score,
+                ratio,
+                overlap,
+                exact_title,
+                year_matches,
+            )
+        )
     return sorted(ranked, key=lambda item: (-item.score, item.index))
 
 
-def _plausible_ranked_results(ranked: list[RankedResult], *, requested_year: int | None, limit: int = _MAX_STREAM_PROBES) -> list[RankedResult]:
+def _plausible_ranked_results(
+    ranked: list[RankedResult],
+    *,
+    requested_year: int | None,
+    limit: int = _MAX_STREAM_PROBES,
+) -> list[RankedResult]:
     if not ranked:
         return []
-    eligible = [item for item in ranked if requested_year is None or item.year_matches]
+    eligible = [
+        item for item in ranked if requested_year is None or item.year_matches
+    ]
     if not eligible:
         return []
     exact = [item for item in eligible if item.exact_title]
@@ -161,25 +213,64 @@ def _plausible_ranked_results(ranked: list[RankedResult], *, requested_year: int
     if top.title_ratio < 0.45 and top.word_overlap == 0:
         return []
     floor = max(0.45, top.title_ratio - 0.18)
-    plausible = [item for item in eligible if item.title_ratio >= floor and (item.word_overlap > 0 or item.title_ratio >= 0.8)]
+    plausible = [
+        item
+        for item in eligible
+        if item.title_ratio >= floor
+        and (item.word_overlap > 0 or item.title_ratio >= 0.8)
+    ]
     return (plausible or [top])[:limit]
 
 
-def select_ranked_result(ranked: list[RankedResult], *, requested_year: int | None = None) -> tuple[str, RankedResult | None]:
-    plausible = _plausible_ranked_results(ranked, requested_year=requested_year)
+def select_ranked_result(
+    ranked: list[RankedResult], *, requested_year: int | None = None
+) -> tuple[str, RankedResult | None]:
+    plausible = _plausible_ranked_results(
+        ranked, requested_year=requested_year
+    )
     return ("exact", plausible[0]) if plausible else ("not_found", None)
 
 
-def response_base(query: str, profile: str, media_type: str, year: int | None, season: int | None, episode: int | None) -> dict[str, Any]:
+def response_base(
+    query: str,
+    profile: str,
+    media_type: str,
+    year: int | None,
+    season: int | None,
+    episode: int | None,
+) -> dict[str, Any]:
     return {
-        "ok": True, "status": "not_found", "query": query, "profile": profile,
-        "requested": {"media_type": media_type, "year": year, "season": season, "episode": episode},
-        "selected": None, "results": [],
+        "ok": True,
+        "status": "not_found",
+        "query": query,
+        "profile": profile,
+        "requested": {
+            "media_type": media_type,
+            "year": year,
+            "season": season,
+            "episode": episode,
+        },
+        "selected": None,
+        "results": [],
     }
 
 
-def error_response(*, query: str, profile: str, media_type: str, year: int | None, season: int | None, episode: int | None, message: str) -> dict[str, Any]:
-    return {**response_base(query, profile, media_type, year, season, episode), "ok": False, "status": "error", "error": message}
+def error_response(
+    *,
+    query: str,
+    profile: str,
+    media_type: str,
+    year: int | None,
+    season: int | None,
+    episode: int | None,
+    message: str,
+) -> dict[str, Any]:
+    return {
+        **response_base(query, profile, media_type, year, season, episode),
+        "ok": False,
+        "status": "error",
+        "error": message,
+    }
 
 
 def _safe_int(value: object, *, minimum: int) -> int | None:
@@ -210,154 +301,425 @@ def _episode_records(meta: dict[str, Any]) -> list[dict[str, Any]]:
         if key in seen:
             continue
         seen.add(key)
-        episodes.append({
-            "media_id": media_id, "season": season, "episode": episode,
-            "title": str(video.get("title") or video.get("name") or f"Episode {episode}"),
-            "thumbnail": video.get("thumbnail") or None,
-            "released": video.get("released") or None,
-            "description": video.get("description") or None,
-        })
+        episodes.append(
+            {
+                "media_id": media_id,
+                "season": season,
+                "episode": episode,
+                "title": str(
+                    video.get("title")
+                    or video.get("name")
+                    or f"Episode {episode}"
+                ),
+                "thumbnail": video.get("thumbnail") or None,
+                "released": video.get("released") or None,
+                "description": video.get("description") or None,
+            }
+        )
     return sorted(episodes, key=lambda item: (item["season"], item["episode"]))
 
 
-def _merge_public(base: dict[str, Any], detailed: dict[str, Any]) -> dict[str, Any]:
+def _merge_public(
+    base: dict[str, Any], detailed: dict[str, Any]
+) -> dict[str, Any]:
     merged = dict(base)
-    detail_public = normalize_public_result(detailed, str(base.get("media_type") or ""))
+    detail_public = normalize_public_result(
+        detailed, str(base.get("media_type") or "")
+    )
     for key, value in detail_public.items():
         if value not in (None, ""):
             merged[key] = value
     return merged
 
 
-def _default_stream_orderer(streams: list[dict[str, Any]], profile: str) -> list[dict[str, Any]]:
+def _default_stream_orderer(
+    streams: list[dict[str, Any]], profile: str
+) -> list[dict[str, Any]]:
     del profile
     return order_ideal_streams(
-        streams, DEFAULT_MAX_SIZE_GB, DEFAULT_EXCLUDE_KEYWORDS,
+        streams,
+        DEFAULT_MAX_SIZE_GB,
+        DEFAULT_EXCLUDE_KEYWORDS,
         preferred_quality=DEFAULT_PREFERRED_QUALITY,
         prefer_direct_play=DEFAULT_CAST_COMPATIBILITY_FILTER,
         strict_compatibility=DEFAULT_CAST_COMPATIBILITY_FILTER,
     )
 
 
-async def _best_ideal_stream_seeders(manager: Any, media_type: str, media_id: str, profile: str, stream_orderer: StreamOrderer, semaphore: asyncio.Semaphore) -> tuple[int, bool]:
+async def _best_ideal_stream_seeders(
+    manager: Any,
+    media_type: str,
+    media_id: str,
+    profile: str,
+    stream_orderer: StreamOrderer,
+    semaphore: asyncio.Semaphore,
+) -> tuple[int, bool]:
     try:
         async with semaphore:
             streams = await manager.get_streams(media_type, media_id, profile)
     except Exception:
-        _LOGGER.debug("Stream probe failed for %s/%s", media_type, media_id, exc_info=True)
+        _LOGGER.debug(
+            "Stream probe failed for %s/%s",
+            media_type,
+            media_id,
+            exc_info=True,
+        )
         return 0, False
     ordered = stream_orderer(list(streams), profile)
     return (parse_seeders(ordered[0]), True) if ordered else (0, False)
 
 
-def _episode_public(series_id: str, series_public: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+def _episode_public(
+    series_id: str,
+    series_public: dict[str, Any],
+    item: dict[str, Any],
+) -> dict[str, Any]:
     return {
-        "media_id": item["media_id"], "media_type": "series", "series_id": series_id,
-        "series_title": series_public["title"], "title": item["title"],
-        "year": extract_year(item["released"]), "season": item["season"], "episode": item["episode"],
+        "media_id": item["media_id"],
+        "media_type": "series",
+        "series_id": series_id,
+        "series_title": series_public["title"],
+        "title": item["title"],
+        "year": extract_year(item["released"]),
+        "season": item["season"],
+        "episode": item["episode"],
         "poster": item["thumbnail"] or series_public.get("poster"),
         "background": series_public.get("background"),
         "description": item["description"] or series_public.get("description"),
     }
 
 
-async def _probe_movie(manager: Any, ranked: RankedResult, *, profile: str, stream_orderer: StreamOrderer, semaphore: asyncio.Semaphore, order: int) -> StreamBackedSelection:
+def _account_runtime(manager: Any) -> Any | None:
+    return getattr(manager, _ACCOUNT_RUNTIME_ATTR, None)
+
+
+def _account_library(manager: Any) -> list[dict[str, Any]] | None:
+    runtime = _account_runtime(manager)
+    if runtime is None:
+        return None
+    coordinator = getattr(runtime, "coordinator", None)
+    data = getattr(coordinator, "data", None)
+    if not isinstance(data, dict):
+        return []
+    library = data.get("library", [])
+    if not isinstance(library, list):
+        return []
+    return [item for item in library if isinstance(item, dict)]
+
+
+def _series_history_item(
+    library: list[dict[str, Any]], series_id: str
+) -> dict[str, Any] | None:
+    for item in library:
+        if str(item.get("type") or "") != "series":
+            continue
+        media_id = str(item.get("media_id") or "")
+        playback_id = str(item.get("playback_id") or "")
+        if media_id == series_id or playback_id.split(":", 1)[0] == series_id:
+            return item
+    return None
+
+
+def _history_position(item: dict[str, Any]) -> tuple[int, int] | None:
+    season = _safe_int(item.get("season"), minimum=0)
+    episode = _safe_int(item.get("episode"), minimum=1)
+    if season is not None and episode is not None:
+        return season, episode
+    playback_id = str(item.get("playback_id") or "")
+    parts = playback_id.split(":")
+    if len(parts) < 3:
+        return None
+    season = _safe_int(parts[-2], minimum=0)
+    episode = _safe_int(parts[-1], minimum=1)
+    if season is None or episode is None:
+        return None
+    return season, episode
+
+
+def _regular_episodes(
+    all_episodes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    regular = [item for item in all_episodes if int(item["season"]) > 0]
+    return regular or all_episodes
+
+
+def _next_account_episode(
+    all_episodes: list[dict[str, Any]],
+    history: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    candidates = _regular_episodes(all_episodes)
+    if not candidates:
+        return None
+    if history is None:
+        return candidates[0]
+    current = _history_position(history)
+    if current is None:
+        return candidates[0]
+    return next(
+        (
+            item
+            for item in candidates
+            if (int(item["season"]), int(item["episode"])) > current
+        ),
+        None,
+    )
+
+
+async def _probe_movie(
+    manager: Any,
+    ranked: RankedResult,
+    *,
+    profile: str,
+    stream_orderer: StreamOrderer,
+    semaphore: asyncio.Semaphore,
+    order: int,
+) -> StreamBackedSelection:
     chosen = ranked.result
     try:
-        detailed = await manager.get_meta("movie", str(chosen["media_id"]), PROFILE_DEFAULT)
+        detailed = await manager.get_meta(
+            "movie", str(chosen["media_id"]), PROFILE_DEFAULT
+        )
     except Exception:
-        _LOGGER.debug("Movie metadata enrichment failed for %s", chosen["media_id"])
+        _LOGGER.debug(
+            "Movie metadata enrichment failed for %s", chosen["media_id"]
+        )
     else:
         chosen = _merge_public(chosen, detailed)
-    seeders, has_stream = await _best_ideal_stream_seeders(manager, "movie", str(chosen["media_id"]), profile, stream_orderer, semaphore)
-    return StreamBackedSelection(ranked, chosen, seeders, has_stream, order)
+    seeders, has_stream = await _best_ideal_stream_seeders(
+        manager,
+        "movie",
+        str(chosen["media_id"]),
+        profile,
+        stream_orderer,
+        semaphore,
+    )
+    return StreamBackedSelection(
+        ranked, chosen, seeders, has_stream, order
+    )
 
 
-async def _series_candidates(manager: Any, base: dict[str, Any], ranked: RankedResult, *, profile: str, season: int | None, episode: int | None, stream_orderer: StreamOrderer, semaphore: asyncio.Semaphore, order_offset: int) -> tuple[list[StreamBackedSelection], dict[str, Any] | None]:
+async def _series_candidates(
+    manager: Any,
+    base: dict[str, Any],
+    ranked: RankedResult,
+    *,
+    profile: str,
+    season: int | None,
+    episode: int | None,
+    stream_orderer: StreamOrderer,
+    semaphore: asyncio.Semaphore,
+    order_offset: int,
+) -> tuple[list[StreamBackedSelection], dict[str, Any] | None]:
     series_id = str(ranked.result["media_id"])
     metadata_profile = PROFILE_LATIN if profile == PROFILE_LATIN else PROFILE_DEFAULT
     try:
         meta = await manager.get_meta("series", series_id, metadata_profile)
     except Exception:
-        _LOGGER.debug("Could not resolve series metadata for %s", series_id, exc_info=True)
+        _LOGGER.debug(
+            "Could not resolve series metadata for %s", series_id, exc_info=True
+        )
         return [], None
+
     series_public = _merge_public(ranked.result, meta)
     all_episodes = _episode_records(meta)
     available_seasons = sorted({item["season"] for item in all_episodes})
     episodes = all_episodes
+    account_priority = 0
+    automatic_reason: str | None = None
+
+    explicit_request = season is not None or episode is not None
     if season is not None:
         episodes = [item for item in episodes if item["season"] == season]
     if episode is not None:
         episodes = [item for item in episodes if item["episode"] == episode]
+
+    library = _account_library(manager)
+    if not explicit_request and library is not None:
+        history = _series_history_item(library, series_id)
+        target = _next_account_episode(all_episodes, history)
+        if target is None and history is not None:
+            current = _history_position(history)
+            return [], {
+                **base,
+                "status": "up_to_date",
+                "selected": None,
+                "series_id": series_id,
+                "series_title": series_public.get("title"),
+                "last_watched": {
+                    "season": current[0] if current else history.get("season"),
+                    "episode": current[1] if current else history.get("episode"),
+                },
+            }
+        episodes = [target] if target is not None else []
+        if history is None:
+            account_priority = 1
+            automatic_reason = "stremio_first_episode"
+        else:
+            account_priority = 2
+            automatic_reason = "stremio_next_episode"
+
     if not episodes:
-        response = {**base, "status": "episode_not_found", "available_seasons": available_seasons}
+        response = {
+            **base,
+            "status": "episode_not_found",
+            "available_seasons": available_seasons,
+        }
         if season is not None:
             response["available_episodes"] = [
-                {"season": item["season"], "episode": item["episode"], "title": item["title"]}
-                for item in all_episodes if item["season"] == season
+                {
+                    "season": item["season"],
+                    "episode": item["episode"],
+                    "title": item["title"],
+                }
+                for item in all_episodes
+                if item["season"] == season
             ][:50]
         return [], response
+
     episodes = episodes[:_MAX_EPISODE_PROBES]
 
-    async def probe(item: dict[str, Any], index: int) -> StreamBackedSelection:
-        seeders, has_stream = await _best_ideal_stream_seeders(manager, "series", str(item["media_id"]), profile, stream_orderer, semaphore)
-        return StreamBackedSelection(ranked, _episode_public(series_id, series_public, item), seeders, has_stream, order_offset + index)
+    async def probe(
+        item: dict[str, Any], index: int
+    ) -> StreamBackedSelection:
+        seeders, has_stream = await _best_ideal_stream_seeders(
+            manager,
+            "series",
+            str(item["media_id"]),
+            profile,
+            stream_orderer,
+            semaphore,
+        )
+        selected = _episode_public(series_id, series_public, item)
+        if automatic_reason is not None:
+            selected["selection_reason"] = automatic_reason
+        return StreamBackedSelection(
+            ranked,
+            selected,
+            seeders,
+            has_stream,
+            order_offset + index,
+            account_priority=account_priority,
+        )
 
-    return list(await asyncio.gather(*(probe(item, index) for index, item in enumerate(episodes)))), None
+    return list(
+        await asyncio.gather(
+            *(probe(item, index) for index, item in enumerate(episodes))
+        )
+    ), None
 
 
-def _choose_stream_backed(candidates: list[StreamBackedSelection]) -> StreamBackedSelection | None:
+def _choose_stream_backed(
+    candidates: list[StreamBackedSelection],
+) -> StreamBackedSelection | None:
     if not candidates:
         return None
-    return min(candidates, key=lambda item: (0 if item.has_stream else 1, -item.seeders, -item.ranked.score, item.order))
+    return min(
+        candidates,
+        key=lambda item: (
+            -item.account_priority,
+            0 if item.has_stream else 1,
+            -item.seeders,
+            -item.ranked.score,
+            item.order,
+        ),
+    )
 
 
 async def async_resolve_content(
-    manager: Any, *, query: str, media_type: str = "all", profile: str = PROFILE_DEFAULT,
-    year: int | None = None, season: int | None = None, episode: int | None = None,
-    limit: int = 5, stream_orderer: StreamOrderer | None = None,
+    manager: Any,
+    *,
+    query: str,
+    media_type: str = "all",
+    profile: str = PROFILE_DEFAULT,
+    year: int | None = None,
+    season: int | None = None,
+    episode: int | None = None,
+    limit: int = 5,
+    stream_orderer: StreamOrderer | None = None,
 ) -> dict[str, Any]:
-    """Resolve directly, choosing by seeds after the ideal-link filter."""
+    """Resolve directly, using Stremio history for implicit series episodes."""
     clean_query = query.strip()
     limit = max(1, min(int(limit), 10))
-    base = response_base(clean_query, profile, media_type, year, season, episode)
+    base = response_base(
+        clean_query, profile, media_type, year, season, episode
+    )
     if profile == PROFILE_SPORTS:
-        return {**base, "ok": False, "status": "unsupported", "error": "Sports profile search is not supported yet"}
+        return {
+            **base,
+            "ok": False,
+            "status": "unsupported",
+            "error": "Sports profile search is not supported yet",
+        }
     media_types = ("movie", "series") if media_type == "all" else (media_type,)
     try:
         raw_results = await manager.search(clean_query, media_types)
     except Exception:
         _LOGGER.exception("Catalog search failed while resolving %r", clean_query)
-        return {**base, "ok": False, "status": "error", "error": "Catalog provider error"}
+        return {
+            **base,
+            "ok": False,
+            "status": "error",
+            "error": "Catalog provider error",
+        }
     ranked = rank_results(raw_results, clean_query, requested_year=year)
-    plausible = _plausible_ranked_results(ranked, requested_year=year, limit=min(limit, _MAX_STREAM_PROBES))
+    plausible = _plausible_ranked_results(
+        ranked,
+        requested_year=year,
+        limit=min(limit, _MAX_STREAM_PROBES),
+    )
     if not plausible:
         return {**base, "status": "not_found"}
+
     orderer = stream_orderer or _default_stream_orderer
     semaphore = asyncio.Semaphore(_STREAM_PROBE_CONCURRENCY)
     candidates: list[StreamBackedSelection] = []
     explicit_episode_error: dict[str, Any] | None = None
+    up_to_date_response: dict[str, Any] | None = None
     order_offset = 0
+
     for item in plausible:
         if item.result["media_type"] == "series":
             selections, error = await _series_candidates(
-                manager, base, item, profile=profile, season=season, episode=episode,
-                stream_orderer=orderer, semaphore=semaphore, order_offset=order_offset,
+                manager,
+                base,
+                item,
+                profile=profile,
+                season=season,
+                episode=episode,
+                stream_orderer=orderer,
+                semaphore=semaphore,
+                order_offset=order_offset,
             )
             candidates.extend(selections)
             order_offset += max(1, len(selections))
-            if error is not None and explicit_episode_error is None:
-                explicit_episode_error = error
+            if error is not None:
+                if error.get("status") == "up_to_date":
+                    up_to_date_response = error
+                elif explicit_episode_error is None:
+                    explicit_episode_error = error
         else:
-            candidates.append(await _probe_movie(
-                manager, item, profile=profile, stream_orderer=orderer,
-                semaphore=semaphore, order=order_offset,
-            ))
+            candidates.append(
+                await _probe_movie(
+                    manager,
+                    item,
+                    profile=profile,
+                    stream_orderer=orderer,
+                    semaphore=semaphore,
+                    order=order_offset,
+                )
+            )
             order_offset += 1
+
+    if up_to_date_response is not None and not any(
+        item.account_priority >= 2 for item in candidates
+    ):
+        return up_to_date_response
+
     chosen = _choose_stream_backed(candidates)
     if chosen is None:
         return explicit_episode_error or {**base, "status": "not_found"}
+
     selected = dict(chosen.selected)
     selected["seeders"] = chosen.seeders
-    selected["selection_reason"] = "ideal_stream_seeders"
+    selected.setdefault("selection_reason", "ideal_stream_seeders")
     return {**base, "status": "exact", "selected": selected}
